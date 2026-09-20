@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.omargond.shutdown-timer",
+  "name": "Shutdown Timer",
+  "version": "0.1.0",
+  "author": "OmarGonD",
+  "license": "MIT",
+  "description": "Programa, consulta y cancela apagados seguros mediante systemd-logind.",
+  "kinds": ["panel", "bar-widget"],
+  "entryPoints": {
+    "panel": "ShutdownPanel.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Shutdown Timer",
+    "description": "Abrir el programador de apagado",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
