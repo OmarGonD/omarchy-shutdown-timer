@@ -6,9 +6,8 @@
   "author": "OmarGonD",
   "license": "MIT",
   "description": "Programa, consulta y cancela apagados seguros mediante systemd-logind.",
-  "kinds": ["panel", "bar-widget"],
+  "kinds": ["bar-widget"],
   "entryPoints": {
-    "panel": "ShutdownPanel.qml",
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
