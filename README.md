@@ -60,6 +60,17 @@ horas. Se rechazan vacío, cero, negativos, letras, formatos inválidos y valore
 mayores al máximo. Si ya existe un temporizador, la CLI permite reemplazarlo,
 conservarlo o cancelar la operación (`--replace`, `--keep`, `--cancel`).
 
+## Acciones, extender y cuenta regresiva
+
+```bash
+shutdown-timer --action reboot 1h     # poweroff (defecto), reboot, suspend, hibernate, lock, logout
+shutdown-timer extend 30m             # suma tiempo al temporizador activo
+shutdown-timer status                 # acción, restante y hora prevista
+shutdown-timer status --short         # solo la cuenta regresiva (la usa el widget)
+```
+
+En el panel: `1`–`6` eligen la acción (Bloquear, Cerrar sesión, Suspender, Hibernar, Reiniciar, Apagar), `Hibernar` solo aparece si `omarchy-hibernation-available` lo permite, y las acciones destructivas (cerrar sesión, reiniciar, apagar) piden confirmación con `Enter`/`Esc`. Haz clic en el campo de texto para escribir una duración; mientras tiene foco, los números no cambian la acción.
+
 ## Funcionamiento y seguridad
 
 Se crean dos unidades transitorias de systemd de usuario: una notifica cuando

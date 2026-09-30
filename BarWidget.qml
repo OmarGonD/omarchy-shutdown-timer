@@ -24,6 +24,14 @@ BarWidget {
   }
   Process { id: fallback; command: ["shutdown-timer", "menu"] }
 
+  property string remaining: ""
+  Process {
+    id: poll
+    command: ["shutdown-timer", "status", "--short"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.remaining = String(text).trim() }
+  }
+  Timer { interval: 15000; repeat: true; running: true; triggeredOnStart: true; onTriggered: if (!poll.running) poll.running = true }
+
   Loader {
     id: panelLoader
     active: true
@@ -39,8 +47,8 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰐥"
-    tooltipText: "Shutdown Timer"
+    text: root.remaining !== "" ? "󰐥 " + root.remaining : "󰐥"
+    tooltipText: root.remaining !== "" ? "Shutdown Timer: " + root.remaining : "Shutdown Timer"
     onPressed: root.openPanel()
   }
 }

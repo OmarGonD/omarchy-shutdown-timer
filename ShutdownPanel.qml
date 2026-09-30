@@ -22,6 +22,29 @@ Item {
     property bool editing: false
     property var pendingAction: null
     property bool confirmingShutdown: false
+    property var pendingSchedule: null
+    property string action: "poweroff"
+    property bool hibernateAvailable: false
+    readonly property bool confirming: confirmingShutdown || pendingSchedule !== null
+    readonly property var allActions: [
+        {key: "lock",      label: root.tr("Bloquear"),     confirm: false},
+        {key: "logout",    label: root.tr("Cerrar sesión"), confirm: true},
+        {key: "suspend",   label: root.tr("Suspender"),    confirm: false},
+        {key: "hibernate", label: root.tr("Hibernar"),     confirm: false},
+        {key: "reboot",    label: root.tr("Reiniciar"),    confirm: true},
+        {key: "poweroff",  label: root.tr("Apagar"),       confirm: true}
+    ]
+    readonly property var actions: allActions.filter(function (a) { return a.key !== "hibernate" || hibernateAvailable; })
+    readonly property string scheduledAction: hasSchedule && scheduled.action ? scheduled.action : "poweroff"
+    function actionInfo(key) {
+        for (var i = 0; i < allActions.length; i++)
+            if (allActions[i].key === key) return allActions[i];
+        return allActions[5];
+    }
+    function pickAction(n) {
+        var a = allActions[n - 1];
+        if (a && (a.key !== "hibernate" || hibernateAvailable)) action = a.key;
+    }
     property double now: Date.now()
     readonly property bool hasSchedule: scheduled !== null && scheduled.status === "scheduled"
 
@@ -72,9 +95,11 @@ Item {
 
     function open(payloadJson) {
         confirmingShutdown = false;
+        pendingSchedule = null;
         now = Date.now();
         closingFromHost = false;
         window.visible = true;
+        hibernateProbe.running = true;
         refresh();
         Qt.callLater(function () {
             durationInput.forceActiveFocus();
@@ -83,6 +108,7 @@ Item {
 
     function close() {
         confirmingShutdown = false;
+        pendingSchedule = null;
         closingFromHost = true;
         window.visible = false;
         closingFromHost = false;
@@ -112,8 +138,20 @@ Item {
         run(["status"]);
     }
     function schedule(value, mode) {
-        if (value.trim() !== "")
-            run(["--yes", mode || "--replace", "schedule", value.trim()]);
+        if (value.trim() === "") return;
+        if (actionInfo(action).confirm) pendingSchedule = {value: value.trim(), mode: mode || "--replace"};
+        else doSchedule(value.trim(), mode || "--replace");
+    }
+    function doSchedule(value, mode) {
+        run(["--yes", "--action", action, mode, "schedule", value]);
+    }
+    function confirmPending() {
+        var p = pendingSchedule;
+        pendingSchedule = null;
+        if (p) doSchedule(p.value, p.mode);
+    }
+    function extend(value) {
+        run(["extend", value]);
     }
 
     function customDuration() {
@@ -153,6 +191,15 @@ Item {
             waitForEnd: true
             onStreamFinished: if (String(text).trim() !== "")
                 root.technicalDetails = String(text).trim()
+        }
+    }
+
+    Process {
+        id: hibernateProbe
+        command: ["bash", "-c", "command -v omarchy-hibernation-available >/dev/null && omarchy-hibernation-available && echo 1 || echo 0"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root.hibernateAvailable = String(text).trim() === "1"
         }
     }
 
@@ -222,15 +269,27 @@ Item {
             enabled: root.opened
             onActivated: {
                 if (root.confirmingShutdown) root.confirmingShutdown = false;
+                else if (root.pendingSchedule !== null) root.pendingSchedule = null;
                 else root.dismiss();
             }
         }
+        Shortcut {
+            sequences: ["Return", "Enter"]
+            enabled: root.opened && root.pendingSchedule !== null
+            onActivated: root.confirmPending()
+        }
+        Shortcut { sequence: "Alt+1"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(1) }
+        Shortcut { sequence: "Alt+2"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(2) }
+        Shortcut { sequence: "Alt+3"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(3) }
+        Shortcut { sequence: "Alt+4"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(4) }
+        Shortcut { sequence: "Alt+5"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(5) }
+        Shortcut { sequence: "Alt+6"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(6) }
 
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Style.space(24)
             spacing: Style.space(20)
-            enabled: !root.confirmingShutdown
+            enabled: !root.confirming
 
             RowLayout {
                 Layout.fillWidth: true
@@ -306,7 +365,7 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 text: root.hasSchedule
-                                    ? (root.scheduled.mode === "simulation" ? root.tr("SIMULACIÓN ACTIVA") : root.tr("APAGADO PROGRAMADO"))
+                                    ? (root.scheduled.mode === "simulation" ? root.tr("SIMULACIÓN ACTIVA") : (root.scheduledAction === "poweroff" ? root.tr("APAGADO PROGRAMADO") : root.tr("ACCIÓN PROGRAMADA")))
                                     : root.tr("SIN APAGADOS PENDIENTES")
                                 color: root.accent
                                 font.pixelSize: Style.font.caption
@@ -321,7 +380,9 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 text: root.hasSchedule
-                                    ? root.tr("El equipo se apagará el %1", [Qt.formatDateTime(new Date(root.scheduled.target_epoch * 1000), Qt.locale(), Locale.ShortFormat)])
+                                    ? (root.scheduledAction === "poweroff"
+                                        ? root.tr("El equipo se apagará el %1", [Qt.formatDateTime(new Date(root.scheduled.target_epoch * 1000), Qt.locale(), Locale.ShortFormat)])
+                                        : root.tr("Se ejecutará «%1» el %2", [root.actionInfo(root.scheduledAction).label, Qt.formatDateTime(new Date(root.scheduled.target_epoch * 1000), Qt.locale(), Locale.ShortFormat)]))
                                     : root.tr("Elige una duración y nosotros llevamos la cuenta.")
                                 color: root.mutedInk
                             }
@@ -340,7 +401,46 @@ Item {
                                     onClicked: root.run(["cancel"])
                                 }
                             }
+                            RowLayout {
+                                visible: root.hasSchedule
+                                spacing: Style.space(8)
+                                Label { text: root.tr("Extender") + ":"; color: root.mutedInk }
+                                Repeater {
+                                    model: ["15m", "30m", "1h"]
+                                    ActionButton {
+                                        required property string modelData
+                                        text: "+" + modelData
+                                        enabled: !root.busy
+                                        onClicked: root.extend(modelData)
+                                    }
+                                }
+                            }
                         }
+                    }
+
+                    Label {
+                        text: root.tr("Acción")
+                        font.bold: true
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Style.space(8)
+                        Repeater {
+                            model: root.allActions.map(function (a, i) { return {key: a.key, n: i + 1, label: a.label}; })
+                                .filter(function (a) { return a.key !== "hibernate" || root.hibernateAvailable; })
+                            ActionButton {
+                                required property var modelData
+                                text: modelData.n + " " + modelData.label
+                                primary: root.action === modelData.key
+                                enabled: !root.busy
+                                onClicked: root.action = modelData.key
+                            }
+                        }
+                    }
+                    Label {
+                        text: root.tr("Atajos: Alt+1…6 eligen la acción")
+                        color: root.mutedInk
+                        font.pixelSize: Style.font.caption
                     }
 
                     Label {
@@ -474,7 +574,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            visible: root.confirmingShutdown
+            visible: root.confirming
             color: Color.menu.scrim
             z: 10
             MouseArea { anchors.fill: parent }
@@ -492,13 +592,17 @@ Item {
                     spacing: Style.space(16)
                     Label {
                         Layout.fillWidth: true
-                        text: root.tr("¿Apagar el equipo ahora?")
+                        text: root.pendingSchedule !== null
+                            ? root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.action).label, root.pendingSchedule.value])
+                            : root.tr("¿Apagar el equipo ahora?")
                         font.pixelSize: Style.font.title
                         font.bold: true
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: root.tr("Guarda tu trabajo antes de continuar. El equipo se apagará inmediatamente.")
+                        text: root.pendingSchedule !== null
+                            ? root.tr("Guarda tu trabajo antes de continuar.")
+                            : root.tr("Guarda tu trabajo antes de continuar. El equipo se apagará inmediatamente.")
                         color: root.mutedInk
                     }
                     RowLayout {
@@ -507,15 +611,15 @@ Item {
                             Layout.fillWidth: true
                             text: root.tr("Volver")
                             enabled: !immediateShutdown.running
-                            onClicked: root.confirmingShutdown = false
+                            onClicked: { root.confirmingShutdown = false; root.pendingSchedule = null; }
                         }
                         ActionButton {
                             Layout.fillWidth: true
-                            text: immediateShutdown.running ? root.tr("Apagando…") : root.tr("Sí, apagar")
+                            text: immediateShutdown.running ? root.tr("Apagando…") : (root.pendingSchedule !== null ? root.tr("Sí, programar") : root.tr("Sí, apagar"))
                             destructive: true
                             primary: true
                             enabled: !immediateShutdown.running
-                            onClicked: immediateShutdown.running = true
+                            onClicked: root.pendingSchedule !== null ? root.confirmPending() : (immediateShutdown.running = true)
                         }
                     }
                 }
