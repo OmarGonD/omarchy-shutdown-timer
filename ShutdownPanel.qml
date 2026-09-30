@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "Translations.js" as I18n
@@ -15,7 +16,6 @@ Item {
     function tr(key, args) { return I18n.tr(language, key, args); }
     property var shell: null
     property var manifest: null
-    property bool closingFromHost: false
     property string output: ""
     property string customUnit: "m"
     property string timerUnit: "m"
@@ -103,6 +103,7 @@ Item {
 
     FileView {
         id: uiFile
+        printErrors: false
         path: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/shutdown-timer/ui.json"
         onLoaded: {
             try {
@@ -146,7 +147,8 @@ Item {
         repeat: true
         onTriggered: { root.now = Date.now(); root.refresh(); }
     }
-    readonly property bool opened: window.visible
+    property bool opened: false
+    onPendingScheduleChanged: Qt.callLater(function () { sheet.forceActiveFocus(); })
 
     readonly property color ink: Color.menu.text
     readonly property color mutedInk: Util.alpha(ink, 0.65)
@@ -164,8 +166,7 @@ Item {
     function open(payloadJson) {
         pendingSchedule = null;
         now = Date.now();
-        closingFromHost = false;
-        window.visible = true;
+        opened = true;
         tab = tabOrder[0];
         try {
             var payload = JSON.parse(payloadJson || "{}");
@@ -177,22 +178,19 @@ Item {
         hibernateProbe.running = true;
         refresh();
         Qt.callLater(function () {
-            durationInput.forceActiveFocus();
+            sheet.forceActiveFocus();
         });
     }
 
     function close() {
         pendingSchedule = null;
-        closingFromHost = true;
-        window.visible = false;
-        closingFromHost = false;
+        opened = false;
     }
 
     function dismiss() {
+        opened = false;
         if (shell && typeof shell.hide === "function")
             shell.hide("io.github.omargond.shutdown-timer");
-        else
-            window.visible = false;
     }
 
     function run(args) {
@@ -361,38 +359,59 @@ Item {
         wrapMode: Text.WordWrap
     }
 
-    FloatingWindow {
+    // Layer-shell overlay instead of a toplevel window: a toplevel gets tiled by
+    // the compositor, so its width changed with whatever else was open. The card
+    // below has a fixed width that only shrinks when the screen itself is narrower.
+    OverlayWindow {
         id: window
-        title: "Shutdown Timer"
-        color: root.canvas
-        implicitWidth: Style.space(560)
-        implicitHeight: Style.space(600)
-        minimumSize: Qt.size(Style.space(440), Style.space(480))
-        visible: false
-        onVisibleChanged: if (!visible && !root.closingFromHost && root.shell && typeof root.shell.hide === "function")
-            root.shell.hide("io.github.omargond.shutdown-timer")
+        shown: root.opened
+        WlrLayershell.namespace: "omarchy-shutdown-timer"
 
-        Shortcut {
-            sequence: "Escape"
-            enabled: root.opened
-            onActivated: {
-                if (root.pendingSchedule !== null) root.pendingSchedule = null;
-                else root.dismiss();
+        Rectangle {
+            anchors.fill: parent
+            color: Color.menu.scrim
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.dismiss()
+        }
+
+        BorderSurface {
+            id: sheet
+            width: Math.min(Style.space(420), window.width - Style.gapsOut * 4)
+            height: Math.min(Style.space(680), window.height - Style.space(96))
+            radius: Style.cornerRadius
+            anchors.centerIn: parent
+            // Opaque on purpose: layer surfaces only get blur from compositor rules,
+            // so a translucent menu colour would let the windows behind show through.
+            color: Qt.rgba(root.canvas.r, root.canvas.g, root.canvas.b, 1)
+            borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+            focus: true
+
+            MouseArea { anchors.fill: parent; onClicked: sheet.forceActiveFocus() }
+
+            Keys.onPressed: function (event) {
+                var ctrl = event.modifiers & Qt.ControlModifier;
+                var alt = event.modifiers & Qt.AltModifier;
+                if (event.key === Qt.Key_Escape) {
+                    if (root.pendingSchedule !== null) root.pendingSchedule = null;
+                    else root.dismiss();
+                    event.accepted = true;
+                } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && root.pendingSchedule !== null) {
+                    root.confirmPending();
+                    event.accepted = true;
+                } else if (!root.confirming && ctrl && event.key === Qt.Key_Left) {
+                    root.moveTab(root.tab, -1);
+                    event.accepted = true;
+                } else if (!root.confirming && ctrl && event.key === Qt.Key_Right) {
+                    root.moveTab(root.tab, 1);
+                    event.accepted = true;
+                } else if (!root.confirming && alt && root.tab === 0 && event.key >= Qt.Key_1 && event.key <= Qt.Key_6) {
+                    root.pickAction(event.key - Qt.Key_0);
+                    event.accepted = true;
+                }
             }
-        }
-        Shortcut {
-            sequences: ["Return", "Enter"]
-            enabled: root.opened && root.pendingSchedule !== null
-            onActivated: root.confirmPending()
-        }
-        Shortcut { sequence: "Ctrl+Left"; enabled: root.opened && !root.confirming; onActivated: root.moveTab(root.tab, -1) }
-        Shortcut { sequence: "Ctrl+Right"; enabled: root.opened && !root.confirming; onActivated: root.moveTab(root.tab, 1) }
-        Shortcut { sequence: "Alt+1"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(1) }
-        Shortcut { sequence: "Alt+2"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(2) }
-        Shortcut { sequence: "Alt+3"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(3) }
-        Shortcut { sequence: "Alt+4"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(4) }
-        Shortcut { sequence: "Alt+5"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(5) }
-        Shortcut { sequence: "Alt+6"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(6) }
 
         ColumnLayout {
             anchors.fill: parent
@@ -893,6 +912,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             visible: root.confirming
+            radius: Style.cornerRadius
             color: Color.menu.scrim
             z: 10
             MouseArea { anchors.fill: parent }
@@ -936,6 +956,7 @@ Item {
                     }
                 }
             }
+        }
         }
     }
 }

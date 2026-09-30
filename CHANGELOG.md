@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 - 2026-09-30
+
+- El panel ya no es una ventana normal (que Hyprland teselaba y cuyo ancho cambiaba según las apps abiertas) sino un overlay del shell: tarjeta centrada de ancho fijo `Style.space(420)` que solo se reduce si la pantalla es más estrecha, y alto máximo `Style.space(680)` ajustado a la pantalla. Se cierra con `Esc` o haciendo clic fuera.
+- Fondo opaco y borde del tema; teclas gestionadas en la tarjeta (`Esc`, `Enter`, `Ctrl+←/→`, `Alt+1…6`).
+
 ## 0.4.0 - 2026-09-30
 
 - Programar ahora ofrece dos opciones, «Apagado» y «Temporizador», y muestra solo las opciones de la elegida.
