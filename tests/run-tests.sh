@@ -21,6 +21,10 @@ cat > "$TMP/bin/paplay" <<'MOCKEOF'
 #!/usr/bin/env bash
 printf 'paplay %s\n' "$*" >> "$MOCK_LOG"
 MOCKEOF
+cat > "$TMP/bin/omarchy-notification-send" <<'MOCKEOF'
+#!/usr/bin/env bash
+printf 'omarchy-notification-send %s\n' "$*" >> "$MOCK_LOG"
+MOCKEOF
 cat > "$TMP/bin/notify-send" <<'EOF'
 #!/usr/bin/env bash
 printf 'notify-send %s\n' "$*" >> "$MOCK_LOG"
@@ -76,9 +80,9 @@ $CLI timers | grep -q 'apagar la cocina' || fail 'listar'; ok 'listar temporizad
 assert_fail "$CLI" timer texto; ok 'rechazar duración inválida en timer'
 assert_fail "$CLI" timer-cancel noexiste; ok 'cancelar id inexistente falla'
 id=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json")
-: > "$LOG"; "$CLI" --internal-alarm "$id"; grep -q 'notify-send.*-u critical' "$LOG" || fail 'alerta'; grep -q 'paplay' "$LOG" || fail 'sonido'; ok 'al vencer avisa con notificación crítica y sonido'
+: > "$LOG"; "$CLI" --internal-alarm "$id"; grep -q 'omarchy-notification-send.*-u critical.*-t 0' "$LOG" || fail 'alerta'; grep -q 'paplay' "$LOG" || fail 'sonido'; ok 'al vencer avisa con notificación crítica y sonido'
 [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 1 ]] || fail 'quitar disparado'; ok 'temporizador disparado se elimina'
-: > "$LOG"; "$CLI" --internal-alarm "$id"; ! grep -q notify-send "$LOG" || fail 'doble alerta'; ok 'no avisa dos veces'
+: > "$LOG"; "$CLI" --internal-alarm "$id"; ! grep -q omarchy-notification-send "$LOG" || fail 'doble alerta'; ok 'no avisa dos veces'
 id2=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json"); $CLI timer-cancel "$id2" >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'cancelar'; ok 'cancelar temporizador'
 $CLI timer 1h >/dev/null; $CLI timer 2h >/dev/null; $CLI timer-cancel all >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'cancelar todos'; ok 'cancelar todos'
 $CLI timers | grep -q 'No hay' || fail 'vacío'; ok 'lista vacía'

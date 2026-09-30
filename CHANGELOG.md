@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 - 2026-09-30
+
+- Las notificaciones usan `omarchy-notification-send` con un glifo (`omarchy-glyph`) en el hueco del icono, con los colores del tema, en vez del icono `alarm-clock` que no existe en todos los temas y se veía como el cuadro magenta de «icono no encontrado». Sin `omarchy-notification-send` se usa `notify-send` con la misma pista.
+
 ## 0.6.1 - 2026-09-30
 
 - Reloj de cuenta regresiva: el último minuto se dibuja sobre una píldora en el color de urgencia del tema, con texto claro u oscuro según su luminosidad, en lugar de texto rojo sobre la barra (se leía mal).

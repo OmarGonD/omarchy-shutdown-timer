@@ -41,10 +41,24 @@ with_lock() {
   flock -n 9 || die 'hay otra operación en curso; inténtalo de nuevo'
   "$@"
 }
+# Omarchy draws the `omarchy-glyph` hint in the notification's icon slot, in the
+# theme's colours. A themed icon name may not exist (it showed the missing-icon
+# checkerboard), so a glyph is used instead of -i.
+GLYPH_POWER="󰐥"
+GLYPH_TIMER="󰔟"
+send_notification() { # glyph urgency summary body [expire-ms]
+  local glyph=$1 urgency=$2 summary=$3 body=$4 expire=${5:--1}
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send --app-name 'Shutdown Timer' -g "$glyph" -u "$urgency" -t "$expire" "$summary" "$body" >/dev/null 2>&1 && return 0
+  fi
+  command -v notify-send >/dev/null 2>&1 || return 0
+  local -a args=(-u "$urgency" --app-name='Shutdown Timer' -h "string:omarchy-glyph:$glyph")
+  [[ $expire != -1 ]] && args+=(-t "$expire")
+  notify-send "${args[@]}" "$summary" "$body" >/dev/null 2>&1 || true
+}
 notify() {
   notifications_enabled || return 0
-  command -v notify-send >/dev/null 2>&1 || return 0
-  notify-send --app-name='Shutdown Timer' "$1" "$2" >/dev/null 2>&1 || true
+  send_notification "$GLYPH_POWER" normal "$1" "$2"
 }
 validate_duration() {
   local raw=$1 number unit seconds
@@ -228,7 +242,7 @@ cleanup_alarms_locked() {
   alarms_write "$list"
 }
 alert() {
-  command -v notify-send >/dev/null 2>&1 && notify-send -u critical -t 0 --app-name='Shutdown Timer' -i alarm-clock "$1" "$2" >/dev/null 2>&1 || true
+  send_notification "$GLYPH_TIMER" critical "$1" "$2" 0
   local sound=/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga
   if command -v paplay >/dev/null 2>&1 && [[ -f $sound ]]; then timeout 6 paplay "$sound" >/dev/null 2>&1 || true; fi
 }
