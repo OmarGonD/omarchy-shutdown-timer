@@ -4,7 +4,8 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
-export XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.state" XDG_RUNTIME_DIR="$TMP/run"
+export XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.state" XDG_DATA_HOME="$HOME/.local/share" XDG_RUNTIME_DIR="$TMP/run"
+unset XDG_BIN_HOME
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$TMP/bin"
 LOG="$TMP/mock.log"
 cat > "$TMP/bin/systemd-run" <<'EOF'

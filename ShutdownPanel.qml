@@ -23,6 +23,7 @@ Item {
     property var pendingAction: null
     property var pendingSchedule: null
     property int tab: 0
+    property int mode: 0
     property var alarms: []
     readonly property var activeAlarms: alarms
         .filter(function (a) { return a.target_epoch * 1000 > now - 5000; })
@@ -166,6 +167,13 @@ Item {
         closingFromHost = false;
         window.visible = true;
         tab = tabOrder[0];
+        try {
+            var payload = JSON.parse(payloadJson || "{}");
+            if (payload.tab === "schedule") tab = 1;
+            if (payload.tab === "actions") tab = 0;
+            if (payload.mode === "timer") mode = 1;
+            if (payload.mode === "shutdown") mode = 0;
+        } catch (error) {}
         hibernateProbe.running = true;
         refresh();
         Qt.callLater(function () {
@@ -476,8 +484,25 @@ Item {
                     width: scroll.availableWidth
                     spacing: Style.space(18)
 
+                    RowLayout {
+                        visible: root.tab === 1
+                        Layout.fillWidth: true
+                        spacing: Style.space(8)
+                        Repeater {
+                            model: [{m: 0, label: root.tr("Apagado"), glyph: "󰐥"}, {m: 1, label: root.tr("Temporizador"), glyph: "󰔟"}]
+                            ActionButton {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: Style.space(54)
+                                text: modelData.glyph + "  " + modelData.label
+                                primary: root.mode === modelData.m
+                                onClicked: root.mode = modelData.m
+                            }
+                        }
+                    }
+
                     Rectangle {
-                        visible: root.tab === 1 && root.hasSchedule
+                        visible: root.tab === 1 && root.mode === 0 && root.hasSchedule
                         Layout.fillWidth: true
                         implicitHeight: statusContent.implicitHeight + Style.space(36)
                         radius: Style.cornerRadius
@@ -570,18 +595,12 @@ Item {
                     }
 
                     Label {
-                        visible: root.tab === 1
-                        text: root.tr("Apagar el equipo")
-                        font.pixelSize: Style.font.title
-                        font.bold: true
-                    }
-                    Label {
-                        visible: root.tab === 1
+                        visible: root.tab === 1 && root.mode === 0
                         text: root.tr("Duraciones rápidas")
                         font.bold: true
                     }
                     RowLayout {
-                        visible: root.tab === 1
+                        visible: root.tab === 1 && root.mode === 0
                         Layout.fillWidth: true
                         spacing: Style.space(8)
                         Repeater {
@@ -603,7 +622,7 @@ Item {
                     }
 
                     Rectangle {
-                        visible: root.tab === 1
+                        visible: root.tab === 1 && root.mode === 0
                         Layout.fillWidth: true
                         implicitHeight: form.implicitHeight + Style.space(32)
                         radius: Style.cornerRadius
@@ -687,14 +706,8 @@ Item {
                             }
                         }
                     }
-                    Label {
-                        visible: root.tab === 1
-                        text: root.tr("Temporizador con aviso")
-                        font.pixelSize: Style.font.title
-                        font.bold: true
-                    }
                     Rectangle {
-                        visible: root.tab === 1
+                        visible: root.tab === 1 && root.mode === 1
                         Layout.fillWidth: true
                         implicitHeight: timerForm.implicitHeight + Style.space(32)
                         radius: Style.cornerRadius

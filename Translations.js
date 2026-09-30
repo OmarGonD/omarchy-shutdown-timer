@@ -2,6 +2,8 @@
 
 var messages = {
   "es": {
+    "Apagado": "Apagado",
+    "Temporizador": "Temporizador",
     "Apagar el equipo": "Apagar el equipo",
     "Temporizador con aviso": "Temporizador con aviso",
     "Ej. 20 min · 1.5h": "Ej. 20 min · 1.5h",
@@ -75,6 +77,8 @@ var messages = {
     "Detalles técnicos": "Detalles técnicos"
   },
   "en": {
+    "Apagado": "Shutdown",
+    "Temporizador": "Timer",
     "Apagar el equipo": "Shut down the computer",
     "Temporizador con aviso": "Timer with alert",
     "Ej. 20 min · 1.5h": "E.g. 20 min · 1.5h",

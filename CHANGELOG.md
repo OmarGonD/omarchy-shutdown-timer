@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 - 2026-09-30
+
+- Programar ahora ofrece dos opciones, «Apagado» y «Temporizador», y muestra solo las opciones de la elegida.
+- Widget con `allowMultiple` y ajuste `display`: `countdown` muestra un reloj con la cuenta regresiva que solo aparece con un temporizador o apagado activo.
+- El botón de la barra ya no intenta meter texto en el slot de icono; la cuenta regresiva vive en el reloj.
+- Tests aislados también de `XDG_DATA_HOME`: antes `uninstall.sh` podía borrar la CLI instalada.
+
 ## 0.3.0 - 2026-09-30
 
 - Temporizadores con aviso y recordatorio opcional: `timer`, `timers` y `timer-cancel`, varios a la vez.

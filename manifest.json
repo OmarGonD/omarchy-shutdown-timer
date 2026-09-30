@@ -2,19 +2,34 @@
   "schemaVersion": 1,
   "id": "io.github.omargond.shutdown-timer",
   "name": "Shutdown Timer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "OmarGonD",
   "license": "MIT",
   "description": "Programa, consulta y cancela apagados seguros mediante systemd-logind.",
-  "kinds": ["bar-widget"],
+  "kinds": [
+    "bar-widget"
+  ],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "Shutdown Timer",
-    "description": "Abrir el programador de apagado",
+    "description": "Abrir el programador de apagado y temporizadores; una segunda instancia con display=countdown muestra la cuenta regresiva en la barra.",
     "category": "System",
-    "allowMultiple": false,
-    "defaultSection": "right"
+    "allowMultiple": true,
+    "defaultSection": "right",
+    "schema": [
+      {
+        "key": "display",
+        "type": "enum",
+        "label": "Display",
+        "options": [
+          "full",
+          "countdown"
+        ],
+        "defaultValue": "full",
+        "description": "full: botón que abre el panel. countdown: reloj con la cuenta regresiva que solo aparece mientras hay un temporizador o apagado programado."
+      }
+    ]
   }
 }

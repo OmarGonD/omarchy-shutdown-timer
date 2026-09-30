@@ -84,6 +84,18 @@ shutdown-timer timer-cancel ID              # cancela uno (o "all" para todos)
 
 Al vencer se muestra una notificación crítica que no desaparece sola (`-u critical -t 0`) y suena `alarm-clock-elapsed`. El aviso se muestra aunque `notifications=false`. En el panel están en **Programar → Temporizador con aviso**, con atajos de 5, 10, 20 y 30 minutos y la lista de activos con su cuenta regresiva y un botón ✕ para cancelarlos. Los temporizadores son unidades de systemd de usuario, así que no sobreviven a un reinicio del equipo (al volver a consultar la lista se limpian los vencidos).
 
+## Reloj de cuenta regresiva en la barra
+
+El widget admite varias instancias. Una segunda instancia con `display: countdown` muestra un reloj que **solo aparece mientras hay un temporizador o un apagado programado** y cuenta hacia el más próximo (`󰔟 19:42`, con `+N` si hay más; se pone en rojo el último minuto). Al pasar el ratón lista todos; al hacer clic abre el panel en Programar.
+
+Para añadirlo, agrega una entrada más en `bar.layout.center` (o la sección que prefieras) de `~/.config/omarchy/shell.json`:
+
+```json
+{ "id": "io.github.omargond.shutdown-timer", "display": "countdown" }
+```
+
+La instancia normal (`display: full`, por defecto) sigue siendo el botón que abre el panel; el panel vive en esa instancia, así que conviene mantenerla en la barra. Los widgets de la barra se cargan al iniciar el shell: tras actualizar el plugin ejecuta `omarchy-restart-shell`.
+
 ## Funcionamiento y seguridad
 
 Se crean dos unidades transitorias de systemd de usuario: una notifica cuando
