@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1 - 2026-09-30
+
+- Reloj de cuenta regresiva: el último minuto se dibuja sobre una píldora en el color de urgencia del tema, con texto claro u oscuro según su luminosidad, en lugar de texto rojo sobre la barra (se leía mal).
+
 ## 0.6.0 - 2026-09-30
 
 - El panel vuelve a ser un popout colgado bajo el icono de la barra (mismo `Panel` + `KeyboardPanel` que el plugin Sessions) en vez de un overlay a pantalla completa. Ancho fijo `Style.space(420)`, que solo se reduce en pantallas más estrechas, e independiente de las ventanas abiertas.

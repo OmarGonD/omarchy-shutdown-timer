@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import qs.Ui
 import "Translations.js" as I18n
 
@@ -158,13 +159,32 @@ BarWidget {
   }
 
   // ---- Countdown clock (center) ----------------------------------------
+  // Last minute: a filled pill in the theme's urgent colour with text picked
+  // for contrast against it. Red text straight on the bar was hard to read.
+  readonly property bool urgentNow: nextEntry !== null && nextEntry.target - nowMs / 1000 < 60
+  readonly property color urgentColor: root.bar ? root.bar.urgent : Color.urgent
+  readonly property real urgentLuma: 0.2126 * urgentColor.r + 0.7152 * urgentColor.g + 0.0722 * urgentColor.b
+  readonly property color onUrgent: urgentLuma > 0.5 ? "#101010" : "#ffffff"
+
+  Rectangle {
+    visible: root.showClock && root.urgentNow
+    anchors.fill: clock
+    anchors.topMargin: Math.max(2, (clock.height - Style.space(20)) / 2)
+    anchors.bottomMargin: anchors.topMargin
+    anchors.leftMargin: Style.space(2)
+    anchors.rightMargin: Style.space(2)
+    radius: height / 2
+    color: root.urgentColor
+  }
+
   WidgetButton {
     id: clock
     anchors.fill: parent
     bar: root.bar
     visible: root.showClock
     text: root.nextEntry === null ? "" : root.glyph(root.nextEntry) + " " + root.fmt(root.nextEntry.target) + (root.entries.length > 1 ? "  +" + (root.entries.length - 1) : "")
-    active: root.nextEntry !== null && root.nextEntry.target - root.nowMs / 1000 < 60
+    foreground: root.urgentNow ? root.onUrgent : (root.bar ? root.bar.barForeground : Color.foreground)
+    active: false
     tooltipText: root.tip()
     onPressed: root.openMainPanel()
   }
