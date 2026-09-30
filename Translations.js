@@ -2,6 +2,8 @@
 
 var messages = {
   "es": {
+    "El tiempo empieza al pulsar Iniciar temporizador.": "El tiempo empieza al pulsar Iniciar temporizador.",
+    "Recordatorio": "Recordatorio",
     "Apagado": "Apagado",
     "Temporizador": "Temporizador",
     "Apagar el equipo": "Apagar el equipo",
@@ -77,6 +79,8 @@ var messages = {
     "Detalles técnicos": "Detalles técnicos"
   },
   "en": {
+    "El tiempo empieza al pulsar Iniciar temporizador.": "The time starts when you press Start timer.",
+    "Recordatorio": "Reminder",
     "Apagado": "Shutdown",
     "Temporizador": "Timer",
     "Apagar el equipo": "Shut down the computer",

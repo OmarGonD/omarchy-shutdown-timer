@@ -18,6 +18,7 @@ Item {
     property bool closingFromHost: false
     property string output: ""
     property string customUnit: "m"
+    property string timerUnit: "m"
     property var scheduled: null
     property bool editing: false
     property var pendingAction: null
@@ -35,15 +36,14 @@ Item {
         return h > 0 ? h + "h " + pad(m) + "m" : pad(m) + ":" + pad(sec % 60);
     }
     function startTimer() {
-        var t = timerInput.text.trim().toLowerCase().replace(",", ".");
-        if (/^\d+(\.\d+)?$/.test(t)) t += "m";
-        if (!/^\d+(\.\d+)?(m|h)$/.test(t) || parseFloat(t) <= 0) {
-            output = root.tr("Usa 20, 20m o 1.5h");
+        var amount = Number(timerInput.text.replace(",", "."));
+        if (!isFinite(amount) || amount <= 0) {
+            output = root.tr("Ingresa una cantidad mayor que cero.");
             timerInput.forceActiveFocus();
             return;
         }
         var msg = timerMessage.text.trim();
-        run(["timer", t].concat(msg !== "" ? [msg] : []));
+        run(["timer", String(amount) + timerUnit].concat(msg !== "" ? [msg] : []));
     }
     property var tabOrder: [0, 1]
     function moveTab(id, dir) {
@@ -706,6 +706,29 @@ Item {
                             }
                         }
                     }
+                    Label {
+                        visible: root.tab === 1 && root.mode === 1
+                        text: root.tr("Duraciones rápidas")
+                        font.bold: true
+                    }
+                    RowLayout {
+                        visible: root.tab === 1 && root.mode === 1
+                        Layout.fillWidth: true
+                        spacing: Style.space(8)
+                        Repeater {
+                            model: ["5", "10", "20", "30"]
+                            ActionButton {
+                                required property string modelData
+                                Layout.fillWidth: true
+                                implicitWidth: Style.space(70)
+                                text: modelData + " min"
+                                primary: root.timerUnit === "m" && timerInput.text.trim() === modelData
+                                enabled: !root.busy
+                                onClicked: { root.timerUnit = "m"; timerInput.text = modelData; }
+                            }
+                        }
+                    }
+
                     Rectangle {
                         visible: root.tab === 1 && root.mode === 1
                         Layout.fillWidth: true
@@ -718,48 +741,68 @@ Item {
                             anchors.fill: parent
                             anchors.margins: Style.space(16)
                             spacing: Style.space(12)
+                            Label {
+                                text: root.tr("Duración personalizada")
+                                font.bold: true
+                            }
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: Style.space(8)
-                                Repeater {
-                                    model: ["5m", "10m", "20m", "30m"]
-                                    ActionButton {
-                                        required property string modelData
-                                        Layout.fillWidth: true
-                                        implicitWidth: Style.space(60)
-                                        text: modelData.replace("m", " min")
-                                        primary: timerInput.text.trim() === modelData
-                                        enabled: !root.busy
-                                        onClicked: timerInput.text = modelData
+                                Controls.TextField {
+                                    id: timerInput
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: Style.space(70)
+                                    implicitHeight: Style.space(38)
+                                    placeholderText: root.tr("Ej. 20")
+                                    Accessible.name: root.tr("Cantidad de tiempo")
+                                    color: root.ink
+                                    placeholderTextColor: root.mutedInk
+                                    selectionColor: root.accent
+                                    selectedTextColor: root.canvas
+                                    font.family: Style.font.menuFamily
+                                    font.pixelSize: Style.font.body
+                                    selectByMouse: true
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    enabled: !root.busy
+                                    background: Rectangle {
+                                        radius: Style.cornerRadius
+                                        color: root.canvas
+                                        border.width: timerInput.activeFocus ? 2 : 1
+                                        border.color: timerInput.activeFocus ? root.accent : root.hairline
+                                    }
+                                    onAccepted: timerMessage.forceActiveFocus()
+                                    readonly property var numpadKeys: ({
+                                        [Qt.Key_Insert]: "0", [Qt.Key_End]: "1", [Qt.Key_Down]: "2",
+                                        [Qt.Key_PageDown]: "3", [Qt.Key_Left]: "4", [Qt.Key_Clear]: "5",
+                                        [Qt.Key_Right]: "6", [Qt.Key_Home]: "7", [Qt.Key_Up]: "8",
+                                        [Qt.Key_PageUp]: "9", [Qt.Key_Delete]: "."
+                                    })
+                                    Keys.onPressed: event => {
+                                        if (!(event.modifiers & Qt.KeypadModifier) || !(event.key in numpadKeys)) return;
+                                        if (selectedText.length > 0) remove(selectionStart, selectionEnd);
+                                        insert(cursorPosition, numpadKeys[event.key]);
+                                        event.accepted = true;
                                     }
                                 }
-                            }
-                            Controls.TextField {
-                                id: timerInput
-                                Layout.fillWidth: true
-                                implicitHeight: Style.space(38)
-                                placeholderText: root.tr("Ej. 20 min · 1.5h")
-                                color: root.ink
-                                placeholderTextColor: root.mutedInk
-                                selectionColor: root.accent
-                                selectedTextColor: root.canvas
-                                font.family: Style.font.menuFamily
-                                font.pixelSize: Style.font.body
-                                selectByMouse: true
-                                enabled: !root.busy
-                                background: Rectangle {
-                                    radius: Style.cornerRadius
-                                    color: root.canvas
-                                    border.width: timerInput.activeFocus ? 2 : 1
-                                    border.color: timerInput.activeFocus ? root.accent : root.hairline
+                                ActionButton {
+                                    text: root.tr("Min")
+                                    primary: root.timerUnit === "m"
+                                    enabled: !root.busy
+                                    onClicked: root.timerUnit = "m"
                                 }
-                                onAccepted: timerMessage.forceActiveFocus()
+                                ActionButton {
+                                    text: root.tr("Horas")
+                                    primary: root.timerUnit === "h"
+                                    enabled: !root.busy
+                                    onClicked: root.timerUnit = "h"
+                                }
                             }
                             Controls.TextField {
                                 id: timerMessage
                                 Layout.fillWidth: true
                                 implicitHeight: Style.space(38)
                                 placeholderText: root.tr("Recordatorio opcional, ej. apagar la cocina")
+                                Accessible.name: root.tr("Recordatorio")
                                 color: root.ink
                                 placeholderTextColor: root.mutedInk
                                 selectionColor: root.accent
@@ -776,46 +819,53 @@ Item {
                                 }
                                 onAccepted: root.startTimer()
                             }
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.tr("El tiempo empieza al pulsar Iniciar temporizador.")
+                                color: root.mutedInk
+                                font.pixelSize: Style.font.caption
+                            }
                             ActionButton {
                                 Layout.fillWidth: true
-                                text: root.tr("Iniciar temporizador")
+                                text: root.busy ? root.tr("Procesando…") : root.tr("Iniciar temporizador")
                                 primary: true
                                 enabled: !root.busy
                                 onClicked: root.startTimer()
                             }
+                        }
+                    }
+
+                    Label {
+                        visible: root.tab === 1 && root.mode === 1 && root.activeAlarms.length > 0
+                        text: root.tr("Temporizadores activos")
+                        font.bold: true
+                    }
+                    Repeater {
+                        model: root.tab === 1 && root.mode === 1 ? root.activeAlarms : []
+                        RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Style.space(10)
                             Label {
-                                visible: root.activeAlarms.length > 0
-                                text: root.tr("Temporizadores activos")
+                                text: root.fmtLeft(modelData.target_epoch)
+                                color: root.accent
                                 font.bold: true
+                                wrapMode: Text.NoWrap
                             }
-                            Repeater {
-                                model: root.activeAlarms
-                                RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: Style.space(10)
-                                    Label {
-                                        text: root.fmtLeft(modelData.target_epoch)
-                                        color: root.accent
-                                        font.bold: true
-                                        wrapMode: Text.NoWrap
-                                    }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: modelData.message !== "" ? modelData.message : root.tr("Sin mensaje")
-                                        color: modelData.message !== "" ? root.ink : root.mutedInk
-                                        elide: Text.ElideRight
-                                        wrapMode: Text.NoWrap
-                                    }
-                                    ActionButton {
-                                        text: "✕"
-                                        implicitWidth: Style.space(42)
-                                        destructive: true
-                                        Accessible.name: root.tr("Cancelar temporizador")
-                                        enabled: !root.busy
-                                        onClicked: root.run(["timer-cancel", modelData.id])
-                                    }
-                                }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.message !== "" ? modelData.message : root.tr("Sin mensaje")
+                                color: modelData.message !== "" ? root.ink : root.mutedInk
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                            }
+                            ActionButton {
+                                text: "✕"
+                                implicitWidth: Style.space(42)
+                                destructive: true
+                                Accessible.name: root.tr("Cancelar temporizador")
+                                enabled: !root.busy
+                                onClicked: root.run(["timer-cancel", modelData.id])
                             }
                         }
                     }
