@@ -69,7 +69,7 @@ shutdown-timer status                 # acción, restante y hora prevista
 shutdown-timer status --short         # solo la cuenta regresiva (la usa el widget)
 ```
 
-En el panel: `1`–`6` eligen la acción (Bloquear, Cerrar sesión, Suspender, Hibernar, Reiniciar, Apagar), `Hibernar` solo aparece si `omarchy-hibernation-available` lo permite, y las acciones destructivas (cerrar sesión, reiniciar, apagar) piden confirmación con `Enter`/`Esc`. Haz clic en el campo de texto para escribir una duración; mientras tiene foco, los números no cambian la acción.
+En el panel: `Alt+1`–`Alt+6` eligen la acción (Bloquear, Cerrar sesión, Suspender, Hibernar, Reiniciar, Apagar); `Hibernar` solo aparece si `omarchy-hibernation-available` lo permite. Programar cerrar sesión, reiniciar o apagar pide confirmación (`Enter` confirma, `Esc` cancela). Los botones «+15m/+30m/+1h» extienden el temporizador activo y el widget de barra muestra la cuenta regresiva.
 
 ## Funcionamiento y seguridad
 
