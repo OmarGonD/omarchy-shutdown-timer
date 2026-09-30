@@ -1,36 +1,81 @@
 # Shutdown Timer
 
-Plugin nativo para Omarchy con identificador `io.github.omargond.shutdown-timer`.
-Esta primera fase permite programar, consultar y cancelar el apagado normal de
-la PC mediante un panel gráfico y la CLI `shutdown-timer`.
+![Shutdown Timer popout under its bar icon, with the countdown clock in the center of the bar](preview.png)
 
-La detección de finalización de agentes de IA, procesos, CPU y comandos **no
-forma parte de esta versión**.
+An [Omarchy](https://omarchy.org) bar plugin to **schedule a shutdown, run power actions, and set countdown timers with an optional reminder**. One popout hangs under its bar icon; an optional second instance shows a countdown clock in the center of the bar while something is running.
+
+- **Actions** (instant): lock, log out, suspend, hibernate, restart, shut down. Destructive ones ask for confirmation.
+- **Schedule → Shutdown**: shut down in 30 min, 1 h, 2 h or a custom time; extend or cancel it; a warning notification arrives before it happens.
+- **Schedule → Timer**: several independent timers, each with an optional reminder such as "turn off the stove". A persistent notification and a sound fire when it ends.
+- **Countdown clock** in the bar (`display: countdown`), hidden when nothing is running.
+- A `shutdown-timer` CLI with `--dry-run`, and a test suite that never touches your real files.
+
+## Install
+
+Requirements: Omarchy 4.x, `systemd --user`, `jq`, `awk` and `notify-send`. Optional: `omarchy-notification-send` (themed notifications) and `paplay` (sound).
+
+```bash
+omarchy plugin add https://github.com/OmarGonD/omarchy-shutdown-timer.git --enable --yes
+cd ~/.config/omarchy/plugins/io.github.omargond.shutdown-timer && ./install.sh
+omarchy-restart-shell
+```
+
+`install.sh` does not use sudo. It copies the CLI to `~/.local/share/shutdown-timer/` and links it in `~/.local/bin` (or `$XDG_BIN_HOME`), and creates a default config if you have none. Nothing in your Omarchy or Hyprland configuration is changed. To get the countdown clock, add one entry yourself to `bar.layout.center` in `~/.config/omarchy/shell.json`:
+
+```json
+{ "id": "io.github.omargond.shutdown-timer", "display": "countdown" }
+```
+
+Update with `omarchy plugin update io.github.omargond.shutdown-timer --yes`, run `./install.sh` again and restart the shell.
+
+## Remove
+
+```bash
+cd ~/.config/omarchy/plugins/io.github.omargond.shutdown-timer && ./uninstall.sh
+omarchy plugin remove io.github.omargond.shutdown-timer --yes
+```
+
+This stops the plugin's systemd units and removes the CLI. Your config (`~/.config/shutdown-timer`) and logs (`~/.local/state/shutdown-timer`) are kept; delete them by hand to purge. If you added the countdown clock entry to `shell.json`, remove it there too.
+
+## License
+
+MIT. No external runtime dependencies beyond the tools listed above. The plugin runs unsandboxed inside the Omarchy shell.
+
+---
+
+# Español
+
+Plugin nativo para Omarchy con identificador `io.github.omargond.shutdown-timer`.
+Programa, consulta y cancela el apagado de la PC, ejecuta acciones de energía al
+instante (bloquear, cerrar sesión, suspender, hibernar, reiniciar, apagar) y crea
+temporizadores con aviso y recordatorio opcional, desde un popout bajo su icono de
+la barra y desde la CLI `shutdown-timer`.
 
 ## Requisitos
 
 - Omarchy 4.x con `manifest.json` versión 1.
 - `systemd-run --user`, `systemctl --user`, `notify-send`, `jq` y `awk`.
+  Opcionales: `omarchy-notification-send` y `paplay` (sonido).
 - Una sesión gráfica activa con systemd-logind.
 
 ## Instalación y actualización
 
-Desde el repositorio local o una URL Git confiable:
-
 ```bash
-omarchy plugin add <URL-DEL-REPOSITORIO> --enable --yes
-./install.sh
+omarchy plugin add https://github.com/OmarGonD/omarchy-shutdown-timer.git --enable --yes
+cd ~/.config/omarchy/plugins/io.github.omargond.shutdown-timer && ./install.sh
+omarchy-restart-shell
 ```
 
 `install.sh` es idempotente, no usa sudo y solo instala la CLI en
 `~/.local/bin` (o `$XDG_BIN_HOME`) y crea la configuración predeterminada.
-La activación del panel se realiza mediante el mecanismo oficial de Omarchy.
+No modifica tu configuración de Omarchy ni de Hyprland.
 
 Para actualizar un plugin instalado por Git:
 
 ```bash
 omarchy plugin update io.github.omargond.shutdown-timer --yes
-./install.sh
+cd ~/.config/omarchy/plugins/io.github.omargond.shutdown-timer && ./install.sh
+omarchy-restart-shell
 ```
 
 ## Menú y terminal
@@ -98,20 +143,21 @@ La instancia normal (`display: full`, por defecto) sigue siendo el botón que ab
 
 ## Funcionamiento y seguridad
 
-Se crean dos unidades transitorias de systemd de usuario: una notifica cuando
-faltan 60 segundos y otra ejecuta `systemctl poweroff` al alcanzar la hora
-prevista. No dependen de la terminal y no requieren sudo ni reglas sudoers.
+Se crean dos unidades transitorias de systemd de usuario: una avisa cuando faltan
+`grace_period_seconds` (600 por defecto) y otra ejecuta la acción elegida
+(`systemctl poweroff` por defecto) al alcanzar la hora prevista. No dependen de la terminal y no requieren sudo ni reglas sudoers.
 La orden real está aislada en `poweroff_command()` para pruebas.
 
 El estado y eventos se guardan en `$XDG_STATE_HOME/shutdown-timer`; la
-configuración está en `$XDG_CONFIG_HOME/shutdown-timer/config.ini` y el bloqueo
-de concurrencia usa `$XDG_RUNTIME_DIR`. El estado se escribe mediante archivo
+configuración está en `$XDG_CONFIG_HOME/shutdown-timer/config.ini` y la
+concurrencia se controla con `flock` sobre un archivo dentro del directorio de
+estado (un proceso interrumpido no deja bloqueos colgados). El estado se escribe mediante archivo
 temporal y `mv` atómico. Un estado vencido sin unidades activas se elimina.
 
 Configuración predeterminada:
 
 ```ini
-grace_period_seconds=60
+grace_period_seconds=600
 notifications=true
 maximum_hours=168
 confirm_before_scheduling=true
@@ -140,7 +186,7 @@ estado como `SIMULACIÓN`.
 ## Desinstalación
 
 ```bash
-./uninstall.sh
+cd ~/.config/omarchy/plugins/io.github.omargond.shutdown-timer && ./uninstall.sh
 omarchy plugin remove io.github.omargond.shutdown-timer --yes
 ```
 
@@ -150,12 +196,11 @@ rutas XDG.
 
 ## Pruebas y limitaciones
 
-Las pruebas automatizadas usan un `PATH` falso y mocks de `systemd-run`,
-`systemctl` y `notify-send`; nunca apagan el equipo. El panel requiere que
+Las pruebas automatizadas (`bash tests/run-tests.sh`) usan un `HOME` y un `PATH`
+falsos, con mocks de `systemd-run`, `systemctl`, `notify-send`,
+`omarchy-notification-send` y `paplay`; nunca apagan el equipo ni tocan tus
+archivos reales. El panel requiere que
 `shutdown-timer` esté instalado en `PATH`. El plugin no puede garantizar que el
 apagado continúe después de cerrar por completo la sesión de usuario si el
 administrador de usuarios no permanece activo; durante la sesión gráfica
 normal las unidades son independientes de la terminal.
-
-La segunda fase puede añadir detección de agentes y procesos, pero no está
-incluida aquí.
