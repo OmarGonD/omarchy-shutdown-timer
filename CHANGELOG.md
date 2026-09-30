@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 - 2026-09-30
+
+- El panel vuelve a ser un popout colgado bajo el icono de la barra (mismo `Panel` + `KeyboardPanel` que el plugin Sessions) en vez de un overlay a pantalla completa. Ancho fijo `Style.space(420)`, que solo se reduce en pantallas más estrechas, e independiente de las ventanas abiertas.
+- Alto ajustado a cada vista (Acciones, Apagado, Temporizador); lo que no cabe se desplaza.
+- Si se abre desde el reloj de cuenta regresiva, el popout cuelga bajo el reloj; al cerrarse vuelve a su icono.
+- Fondo opaco detrás del contenido (el color de popup es translúcido y solo se desenfoca con reglas del compositor).
+
 ## 0.5.0 - 2026-09-30
 
 - El panel ya no es una ventana normal (que Hyprland teselaba y cuyo ancho cambiaba según las apps abiertas) sino un overlay del shell: tarjeta centrada de ancho fijo `Style.space(420)` que solo se reduce si la pantalla es más estrecha, y alto máximo `Style.space(680)` ajustado a la pantalla. Se cierra con `Esc` o haciendo clic fuera.

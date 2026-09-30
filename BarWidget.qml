@@ -27,6 +27,21 @@ BarWidget {
   // ---- Panel (only the full instance hosts it) --------------------------
   readonly property bool hasPanel: !countdownMode && panelLoader.item !== null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property var iconItem: button
+  readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+
+  function injectPanel() {
+    var target = panelLoader.item
+    if (!target) return
+    if ("bar" in target) target.bar = root.bar
+    if ("settings" in target) target.settings = root.settings
+    if ("anchorItem" in target && !target.opened) target.anchorItem = button
+    if ("hostWidget" in target) target.hostWidget = root
+    if ("manifest" in target && root.manifest) target.manifest = root.manifest
+  }
+
+  onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
 
   function open(payloadJson) {
     if (panelLoader.item && typeof panelLoader.item.open === "function") panelLoader.item.open(payloadJson)
@@ -36,6 +51,17 @@ BarWidget {
     if (panelLoader.item && typeof panelLoader.item.close === "function") panelLoader.item.close()
   }
 
+  function closeForPopoutSwitch() {
+    if (panelLoader.item && typeof panelLoader.item.closeForPopoutSwitch === "function") panelLoader.item.closeForPopoutSwitch()
+  }
+
+  // Open the popout hanging under `anchor` (the countdown clock passes itself).
+  function openFrom(anchor, payloadJson) {
+    if (!panelLoader.item) return
+    if (anchor && "anchorItem" in panelLoader.item) panelLoader.item.anchorItem = anchor
+    open(payloadJson)
+  }
+
   function openPanel() {
     if (root.opened) root.close()
     else if (panelLoader.item && typeof panelLoader.item.open === "function") root.open()
@@ -43,13 +69,17 @@ BarWidget {
   }
 
   // From the countdown clock: reach the instance that hosts the panel and
-  // open it straight on the view that matches what is counting down.
+  // open it under the clock, straight on the view that matches what is counting down.
   function openMainPanel() {
     var payload = nextEntry && nextEntry.kind === "shutdown"
       ? '{"tab":"schedule","mode":"shutdown"}' : '{"tab":"schedule","mode":"timer"}'
     var items = bar && typeof bar.moduleWidgets === "function" ? bar.moduleWidgets(moduleName) : []
     for (var i = 0; i < items.length; i++) {
-      if (items[i] && items[i].hasPanel === true) { items[i].open(payload); return }
+      if (items[i] && items[i].hasPanel === true) {
+        if (items[i].opened) items[i].close()
+        else items[i].openFrom(clock, payload)
+        return
+      }
     }
     summon.command = ["omarchy-shell", "shell", "summon", moduleName, payload]
     summon.running = true
@@ -65,7 +95,8 @@ BarWidget {
     visible: false
     onLoaded: {
       if ("shell" in item && root.bar && root.bar.shell) item.shell = root.bar.shell
-      if ("manifest" in item && root.manifest) item.manifest = root.manifest
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
     }
   }
 

@@ -3,13 +3,23 @@ import QtQuick.Layouts
 import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
-import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "Translations.js" as I18n
 
-Item {
+Panel {
     id: root
+    moduleName: "io.github.omargond.shutdown-timer"
+    manageIpc: false
+
+    // Injected by BarWidget: the bar API, the icon the popout hangs under and
+    // the widget that owns this panel (the bar tracks that one, not us).
+    property var anchorItem: null
+    property var hostWidget: null
+    readonly property var barIdentity: hostWidget || root
+    // When the panel is opened from the countdown clock it hangs under the
+    // clock; once closed it goes back to its own icon.
+    onOpenedChanged: if (!opened && hostWidget && hostWidget.iconItem) anchorItem = hostWidget.iconItem
 
     readonly property string language: I18n.language(Quickshell.env("LC_ALL") || Quickshell.env("LC_MESSAGES") || Quickshell.env("LANG") || Qt.locale().name)
     property string technicalDetails: ""
@@ -147,8 +157,7 @@ Item {
         repeat: true
         onTriggered: { root.now = Date.now(); root.refresh(); }
     }
-    property bool opened: false
-    onPendingScheduleChanged: Qt.callLater(function () { sheet.forceActiveFocus(); })
+    onPendingScheduleChanged: Qt.callLater(function () { keyCatcher.forceActiveFocus(); })
 
     readonly property color ink: Color.menu.text
     readonly property color mutedInk: Util.alpha(ink, 0.65)
@@ -166,7 +175,7 @@ Item {
     function open(payloadJson) {
         pendingSchedule = null;
         now = Date.now();
-        opened = true;
+        root.controller.show();
         tab = tabOrder[0];
         try {
             var payload = JSON.parse(payloadJson || "{}");
@@ -178,19 +187,17 @@ Item {
         hibernateProbe.running = true;
         refresh();
         Qt.callLater(function () {
-            sheet.forceActiveFocus();
+            keyCatcher.forceActiveFocus();
         });
     }
 
     function close() {
         pendingSchedule = null;
-        opened = false;
+        root.controller.hide();
     }
 
     function dismiss() {
-        opened = false;
-        if (shell && typeof shell.hide === "function")
-            shell.hide("io.github.omargond.shutdown-timer");
+        close();
     }
 
     function run(args) {
@@ -359,37 +366,36 @@ Item {
         wrapMode: Text.WordWrap
     }
 
-    // Layer-shell overlay instead of a toplevel window: a toplevel gets tiled by
-    // the compositor, so its width changed with whatever else was open. The card
-    // below has a fixed width that only shrinks when the screen itself is narrower.
-    OverlayWindow {
-        id: window
-        shown: root.opened
-        WlrLayershell.namespace: "omarchy-shutdown-timer"
+    // Popout hung under the bar icon (same KeyboardPanel the Sessions plugin
+    // uses). The width is fixed and only shrinks on a screen narrower than it,
+    // so it does not depend on what else is open.
+    KeyboardPanel {
+        id: popout
+        anchorItem: root.anchorItem
+        owner: root.barIdentity
+        bar: root.bar
+        open: root.opened
+        centerOnBar: false
+        focusTarget: keyCatcher
+        contentWidth: popout.fittedContentWidth(Style.space(420))
+        // Tall enough for the current view; anything longer scrolls inside.
+        contentHeight: popout.fittedContentHeight(root.tab === 0 ? Style.space(380)
+            : (root.mode === 1 ? Style.space(640) : (root.hasSchedule ? Style.space(680) : Style.space(520))))
 
-        Rectangle {
+        Item {
+            id: keyCatcher
             anchors.fill: parent
-            color: Color.menu.scrim
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            onClicked: root.dismiss()
-        }
-
-        BorderSurface {
-            id: sheet
-            width: Math.min(Style.space(420), window.width - Style.gapsOut * 4)
-            height: Math.min(Style.space(680), window.height - Style.space(96))
-            radius: Style.cornerRadius
-            anchors.centerIn: parent
-            // Opaque on purpose: layer surfaces only get blur from compositor rules,
-            // so a translucent menu colour would let the windows behind show through.
-            color: Qt.rgba(root.canvas.r, root.canvas.g, root.canvas.b, 1)
-            borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
             focus: true
 
-            MouseArea { anchors.fill: parent; onClicked: sheet.forceActiveFocus() }
+            // The popup colour is translucent and only gets blurred by compositor
+            // rules, so paint an opaque base that reaches the card's border.
+            Rectangle {
+                z: -1
+                anchors.fill: parent
+                anchors.margins: -popout.padding
+                radius: Math.max(0, Style.cornerRadius - 2)
+                color: Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 1)
+            }
 
             Keys.onPressed: function (event) {
                 var ctrl = event.modifiers & Qt.ControlModifier;
@@ -415,7 +421,7 @@ Item {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Style.space(24)
+            anchors.margins: Style.space(6)
             spacing: Style.space(20)
             enabled: !root.confirming
 

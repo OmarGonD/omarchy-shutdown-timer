@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.omargond.shutdown-timer",
   "name": "Shutdown Timer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": "OmarGonD",
   "license": "MIT",
   "description": "Programa, consulta y cancela apagados seguros mediante systemd-logind.",

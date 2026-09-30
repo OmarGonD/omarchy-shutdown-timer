@@ -86,7 +86,7 @@ Al vencer se muestra una notificación crítica que no desaparece sola (`-u crit
 
 ## Reloj de cuenta regresiva en la barra
 
-El widget admite varias instancias. Una segunda instancia con `display: countdown` muestra un reloj que **solo aparece mientras hay un temporizador o un apagado programado** y cuenta hacia el más próximo (`󰔟 19:42`, con `+N` si hay más; se pone en rojo el último minuto). Al pasar el ratón lista todos; al hacer clic abre el panel en Programar.
+El widget admite varias instancias. Una segunda instancia con `display: countdown` muestra un reloj que **solo aparece mientras hay un temporizador o un apagado programado** y cuenta hacia el más próximo (`󰔟 19:42`, con `+N` si hay más; se pone en rojo el último minuto). Al pasar el ratón lista todos; al hacer clic abre el panel en Programar, colgado bajo el propio reloj.
 
 Para añadirlo, agrega una entrada más en `bar.layout.center` (o la sección que prefieras) de `~/.config/omarchy/shell.json`:
 
