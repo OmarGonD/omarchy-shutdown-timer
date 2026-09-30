@@ -21,11 +21,10 @@ Item {
     property var scheduled: null
     property bool editing: false
     property var pendingAction: null
-    property bool confirmingShutdown: false
     property var pendingSchedule: null
     property string action: "poweroff"
     property bool hibernateAvailable: false
-    readonly property bool confirming: confirmingShutdown || pendingSchedule !== null
+    readonly property bool confirming: pendingSchedule !== null
     readonly property var allActions: [
         {key: "lock",      label: root.tr("Bloquear"),     confirm: false},
         {key: "logout",    label: root.tr("Cerrar sesión"), confirm: true},
@@ -34,6 +33,7 @@ Item {
         {key: "reboot",    label: root.tr("Reiniciar"),    confirm: true},
         {key: "poweroff",  label: root.tr("Apagar"),       confirm: true}
     ]
+    readonly property var actionGlyphs: ({lock: "󰌾", logout: "󰍃", suspend: "󰒲", hibernate: "󰤁", reboot: "󰜉", poweroff: "󰐥"})
     readonly property var actions: allActions.filter(function (a) { return a.key !== "hibernate" || hibernateAvailable; })
     readonly property string scheduledAction: hasSchedule && scheduled.action ? scheduled.action : "poweroff"
     function actionInfo(key) {
@@ -87,14 +87,13 @@ Item {
     readonly property color hairline: Util.alpha(ink, 0.16)
     readonly property color accent: Color.accent
     readonly property color danger: Color.urgent
-    readonly property bool busy: proc.running || immediateShutdown.running
+    readonly property bool busy: proc.running
     readonly property int minutesLeft: hasSchedule ? Math.max(0, Math.ceil((scheduled.target_epoch * 1000 - now) / 60000)) : 0
     readonly property string remaining: minutesLeft >= 60
         ? root.tr("%1 h %2 min", [Math.floor(minutesLeft / 60), minutesLeft % 60])
         : root.tr("%1 min", [minutesLeft])
 
     function open(payloadJson) {
-        confirmingShutdown = false;
         pendingSchedule = null;
         now = Date.now();
         closingFromHost = false;
@@ -107,7 +106,6 @@ Item {
     }
 
     function close() {
-        confirmingShutdown = false;
         pendingSchedule = null;
         closingFromHost = true;
         window.visible = false;
@@ -203,21 +201,6 @@ Item {
         }
     }
 
-    Process {
-        id: immediateShutdown
-        command: ["systemctl", "poweroff"]
-        stderr: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: if (String(text).trim() !== "") root.technicalDetails = String(text).trim()
-        }
-        onExited: (exitCode, exitStatus) => {
-            if (exitCode !== 0) {
-                root.confirmingShutdown = false;
-                root.output = root.tr("No se pudo apagar el equipo.");
-            }
-        }
-    }
-
 
     component ActionButton: Controls.Button {
         id: control
@@ -246,6 +229,51 @@ Item {
         }
     }
 
+    component ActionTile: Controls.Button {
+        id: tile
+        property string glyph: ""
+        property int number: 0
+        property bool selected: false
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        implicitHeight: Style.space(82)
+        hoverEnabled: true
+        font.family: Style.font.menuFamily
+        font.pixelSize: Style.font.body
+        opacity: enabled ? 1 : 0.45
+        contentItem: ColumnLayout {
+            spacing: Style.space(4)
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                text: tile.glyph
+                color: tile.selected ? root.canvas : root.accent
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.heading
+            }
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                text: tile.text
+                color: tile.selected ? root.canvas : root.ink
+                font: tile.font
+            }
+        }
+        background: Rectangle {
+            radius: Style.cornerRadius
+            color: tile.selected ? root.accent : Util.alpha(root.ink, tile.down ? 0.14 : (tile.hovered ? 0.09 : 0.04))
+            border.width: tile.activeFocus ? 2 : 1
+            border.color: tile.selected || tile.activeFocus ? root.accent : root.hairline
+            Text {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: Style.space(7)
+                text: tile.number
+                color: tile.selected ? root.canvas : root.mutedInk
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+            }
+        }
+    }
+
     component Label: Text {
         color: root.ink
         font.family: Style.font.menuFamily
@@ -268,8 +296,7 @@ Item {
             sequence: "Escape"
             enabled: root.opened
             onActivated: {
-                if (root.confirmingShutdown) root.confirmingShutdown = false;
-                else if (root.pendingSchedule !== null) root.pendingSchedule = null;
+                if (root.pendingSchedule !== null) root.pendingSchedule = null;
                 else root.dismiss();
             }
         }
@@ -322,21 +349,6 @@ Item {
                         font.pixelSize: Style.font.caption
                     }
                 }
-                RowLayout {
-                    spacing: Style.space(8)
-                    ActionButton {
-                        Layout.fillWidth: true
-                        text: root.tr("Cerrar")
-                        onClicked: root.dismiss()
-                    }
-                    ActionButton {
-                        Layout.fillWidth: true
-                        text: root.tr("Apagar")
-                        destructive: true
-                        enabled: !root.busy
-                        onClicked: root.confirmingShutdown = true
-                    }
-                }
             }
 
             Controls.ScrollView {
@@ -352,6 +364,7 @@ Item {
                     spacing: Style.space(18)
 
                     Rectangle {
+                        visible: root.hasSchedule
                         Layout.fillWidth: true
                         implicitHeight: statusContent.implicitHeight + Style.space(36)
                         radius: Style.cornerRadius
@@ -422,25 +435,24 @@ Item {
                         text: root.tr("Acción")
                         font.bold: true
                     }
-                    Flow {
+                    GridLayout {
                         Layout.fillWidth: true
-                        spacing: Style.space(8)
+                        columns: 3
+                        columnSpacing: Style.space(8)
+                        rowSpacing: Style.space(8)
                         Repeater {
-                            model: root.allActions.map(function (a, i) { return {key: a.key, n: i + 1, label: a.label}; })
+                            model: root.allActions.map(function (a, i) { return {key: a.key, n: i + 1, label: a.label, glyph: root.actionGlyphs[a.key]}; })
                                 .filter(function (a) { return a.key !== "hibernate" || root.hibernateAvailable; })
-                            ActionButton {
+                            ActionTile {
                                 required property var modelData
-                                text: modelData.n + " " + modelData.label
-                                primary: root.action === modelData.key
+                                text: modelData.label
+                                glyph: modelData.glyph
+                                number: modelData.n
+                                selected: root.action === modelData.key
                                 enabled: !root.busy
                                 onClicked: root.action = modelData.key
                             }
                         }
-                    }
-                    Label {
-                        text: root.tr("Atajos: Alt+1…6 eligen la acción")
-                        color: root.mutedInk
-                        font.pixelSize: Style.font.caption
                     }
 
                     Label {
@@ -592,17 +604,13 @@ Item {
                     spacing: Style.space(16)
                     Label {
                         Layout.fillWidth: true
-                        text: root.pendingSchedule !== null
-                            ? root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.action).label, root.pendingSchedule.value])
-                            : root.tr("¿Apagar el equipo ahora?")
+                        text: root.pendingSchedule !== null ? root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.action).label, root.pendingSchedule.value]) : ""
                         font.pixelSize: Style.font.title
                         font.bold: true
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: root.pendingSchedule !== null
-                            ? root.tr("Guarda tu trabajo antes de continuar.")
-                            : root.tr("Guarda tu trabajo antes de continuar. El equipo se apagará inmediatamente.")
+                        text: root.tr("Guarda tu trabajo antes de continuar.")
                         color: root.mutedInk
                     }
                     RowLayout {
@@ -610,16 +618,14 @@ Item {
                         ActionButton {
                             Layout.fillWidth: true
                             text: root.tr("Volver")
-                            enabled: !immediateShutdown.running
-                            onClicked: { root.confirmingShutdown = false; root.pendingSchedule = null; }
+                            onClicked: root.pendingSchedule = null
                         }
                         ActionButton {
                             Layout.fillWidth: true
-                            text: immediateShutdown.running ? root.tr("Apagando…") : (root.pendingSchedule !== null ? root.tr("Sí, programar") : root.tr("Sí, apagar"))
+                            text: root.tr("Sí, programar")
                             destructive: true
                             primary: true
-                            enabled: !immediateShutdown.running
-                            onClicked: root.pendingSchedule !== null ? root.confirmPending() : (immediateShutdown.running = true)
+                            onClicked: root.confirmPending()
                         }
                     }
                 }
