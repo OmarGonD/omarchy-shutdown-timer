@@ -64,7 +64,21 @@ format_duration() {
   elif ((s % 60 == 0)); then printf '%dm' "$((s/60))"
   else printf '%dm %ds' "$((s/60))" "$((s%60))"; fi
 }
+format_remaining() {
+  local s=$1
+  if ((s >= 3600)); then printf '%dh %02dm' "$((s/3600))" "$(((s%3600)/60))"
+  elif ((s >= 60)); then printf '%dm %02ds' "$((s/60))" "$((s%60))"
+  else printf '%ds' "$s"; fi
+}
 pretty_date() { date '+%Y-%m-%d %H:%M:%S %Z' -d "@$1"; }
+action_label() { case "$1" in poweroff) echo apagado ;; reboot) echo reinicio ;; suspend) echo suspensión ;; hibernate) echo hibernación ;; lock) echo bloqueo ;; logout) echo cierre de sesión ;; esac; }
+validate_action() {
+  case "$1" in poweroff|reboot|suspend|hibernate|lock|logout) printf '%s\n' "$1" ;; *) die "acción inválida: '$1' (usa poweroff, reboot, suspend, hibernate, lock o logout)" ;; esac
+}
+write_state() {
+  local mode=$1 raw=$2 seconds=$3 target=$4 action=$5
+  atomic_state "$(jq -cn --arg c "$(timestamp)" --arg d "$raw" --argjson s "$seconds" --argjson t "$target" --arg w "$WARNING_UNIT" --arg p "$POWEROFF_UNIT" --arg m "$mode" --arg a "$action" '{created_at:$c,duration:$d,duration_seconds:$s,target_epoch:$t,target_at:($t|todateiso8601),warning_unit:$w,poweroff_unit:$p,action:$a,mode:$m,status:"scheduled"}')"
+}
 units_active() { systemctl --user is-active --quiet "$WARNING_UNIT" || systemctl --user is-active --quiet "$POWEROFF_UNIT"; }
 clear_units() { systemctl --user stop "$WARNING_UNIT" "$POWEROFF_UNIT" >/dev/null 2>&1 || true; systemctl --user reset-failed "$WARNING_UNIT" "$POWEROFF_UNIT" >/dev/null 2>&1 || true; }
 cleanup_stale() {
@@ -99,32 +113,43 @@ schedule_locked() {
   fi
   target=$(( $(now_epoch) + seconds )); warning_delay=$((seconds - $(grace_seconds))); ((warning_delay < 0)) && warning_delay=0
   if [[ $dry == true ]]; then
-    atomic_state "$(jq -cn --arg c "$(timestamp)" --arg d "$raw" --argjson s "$seconds" --argjson t "$target" --arg w "$WARNING_UNIT" --arg p "$POWEROFF_UNIT" '{created_at:$c,duration:$d,duration_seconds:$s,target_epoch:$t,target_at:($t|todateiso8601),warning_unit:$w,poweroff_unit:$p,mode:"simulation",status:"scheduled"}')"
+    write_state simulation "$raw" "$seconds" "$target" "$ACTION"
     log_event "dry_run_scheduled duration=$raw target_epoch=$target"
     note "SIMULACIÓN: habría creado $WARNING_UNIT (--on-active=${warning_delay}s) y $POWEROFF_UNIT (--on-active=${seconds}s)."
-    note 'SIMULACIÓN: el servicio final ejecutaría: systemctl poweroff'
+    note "SIMULACIÓN: el servicio final ejecutaría la acción: $ACTION"
     note "SIMULACIÓN: notificación final prevista para $(pretty_date "$target")."
   else
     systemd-run --user --unit="$WARNING_UNIT" --on-active="${warning_delay}s" --collect -- "$SELF" --internal-warning
     systemd-run --user --unit="$POWEROFF_UNIT" --on-active="${seconds}s" --collect -- "$SELF" --internal-poweroff
-    atomic_state "$(jq -cn --arg c "$(timestamp)" --arg d "$raw" --argjson s "$seconds" --argjson t "$target" --arg w "$WARNING_UNIT" --arg p "$POWEROFF_UNIT" '{created_at:$c,duration:$d,duration_seconds:$s,target_epoch:$t,target_at:($t|todateiso8601),warning_unit:$w,poweroff_unit:$p,mode:"live",status:"scheduled"}')"
+    write_state live "$raw" "$seconds" "$target" "$ACTION"
     log_event "scheduled duration=$raw target_epoch=$target warning_unit=$WARNING_UNIT poweroff_unit=$POWEROFF_UNIT"
   fi
-  note "Apagado programado para: $(pretty_date "$target")"
+  note "Programado ($(action_label "$ACTION")) para: $(pretty_date "$target")"
   note "Tiempo restante: $(format_duration "$seconds")"
   note 'Cancela con: shutdown-timer cancel'
-  notify 'Apagado programado' "Faltan $(format_duration "$seconds"). Hora prevista: $(pretty_date "$target"). Cancela con shutdown-timer cancel."
+  notify "Programado: $(action_label "$ACTION")" "Faltan $(format_duration "$seconds"). Hora prevista: $(pretty_date "$target"). Cancela con shutdown-timer cancel."
 }
 schedule_cmd() { with_lock schedule_locked "$@"; }
 status_cmd() {
   cleanup_stale
-  [[ -f "$STATE_FILE" ]] || { note 'No hay ningún apagado programado.'; return 0; }
-  local mode target duration unit status
+  local short=${1:-false}
+  if [[ ! -f "$STATE_FILE" || $(jq -r '.status // ""' "$STATE_FILE") != scheduled ]]; then
+    [[ $short == true ]] || note 'No hay ningún apagado programado.'
+    return 0
+  fi
+  local mode target duration unit action left
   mode=$(jq -r '.mode // "live"' "$STATE_FILE"); target=$(jq -r '.target_epoch' "$STATE_FILE")
-  duration=$(jq -r '.duration' "$STATE_FILE"); unit=$(jq -r '.poweroff_unit' "$STATE_FILE"); status=$(jq -r '.status' "$STATE_FILE")
-  [[ $status == scheduled ]] || { note 'No hay ningún apagado programado.'; return 0; }
+  duration=$(jq -r '.duration' "$STATE_FILE"); unit=$(jq -r '.poweroff_unit' "$STATE_FILE"); action=$(jq -r '.action // "poweroff"' "$STATE_FILE")
+  left=$((target - $(now_epoch))); ((left < 0)) && left=0
+  if [[ $short == true ]]; then format_remaining "$left"; return 0; fi
   [[ $mode == simulation ]] && mode='SIMULACIÓN' || mode='ACTIVO'
-  printf '%s: %s\nDuración: %s\nApagado previsto: %s\nServicio: %s\n' "$mode" "$status" "$duration" "$(pretty_date "$target")" "$unit"
+  printf '%s: scheduled
+Acción: %s
+Duración: %s
+Restante: %s
+Previsto: %s
+Servicio: %s
+' "$mode" "$(action_label "$action")" "$duration" "$(format_remaining "$left")" "$(pretty_date "$target")" "$unit"
 }
 cancel_locked() {
   cleanup_stale
@@ -141,16 +166,48 @@ cancel_locked() {
   fi
   clear_units
   jq '.status="cancelled"' "$STATE_FILE" > "$STATE_DIR/.cancelled.$$"; mv -f -- "$STATE_DIR/.cancelled.$$" "$STATE_FILE"
-  log_event "cancelled mode=$mode"; [[ $mode == simulation ]] && mode='SIMULACIÓN' || mode='ACTIVO'; note "$mode: apagado cancelado."; notify 'Apagado cancelado' 'El temporizador ya no apagará la PC.'
+  log_event "cancelled mode=$mode"; [[ $mode == simulation ]] && mode='SIMULACIÓN' || mode='ACTIVO'; note "$mode: apagado cancelado."; notify 'Apagado cancelado' 'El temporizador ya no actuará sobre la PC.'
 }
+extend_locked() {
+  local raw=$1 seconds old_target new_target left
+  seconds=$(validate_duration "$raw"); cleanup_stale
+  [[ -f "$STATE_FILE" && $(jq -r '.status // ""' "$STATE_FILE") == scheduled ]] || die 'no hay ningún temporizador que extender'
+  local mode action; mode=$(jq -r '.mode // "live"' "$STATE_FILE"); action=$(jq -r '.action // "poweroff"' "$STATE_FILE")
+  if [[ $DRY == true && $mode == live ]]; then note 'SIMULACIÓN: no se extiende un temporizador real.'; return 0; fi
+  old_target=$(jq -r '.target_epoch' "$STATE_FILE"); new_target=$((old_target + seconds)); left=$((new_target - $(now_epoch)))
+  ((left <= 0)) && die 'el temporizador ya expiró'
+  ((left <= $(max_hours) * 3600)) || die "el total supera el máximo de $(max_hours) horas"
+  if [[ $mode == live ]]; then
+    local warning_delay=$((left - $(grace_seconds))); ((warning_delay < 0)) && warning_delay=0
+    clear_units
+    systemd-run --user --unit="$WARNING_UNIT" --on-active="${warning_delay}s" --collect -- "$SELF" --internal-warning
+    systemd-run --user --unit="$POWEROFF_UNIT" --on-active="${left}s" --collect -- "$SELF" --internal-poweroff
+  fi
+  write_state "$mode" "$(jq -r '.duration' "$STATE_FILE")+$raw" "$left" "$new_target" "$action"
+  log_event "extended by=$raw target_epoch=$new_target"
+  note "Extendido $raw. Nuevo objetivo: $(pretty_date "$new_target") (restan $(format_remaining "$left"))"
+  notify 'Temporizador extendido' "Nueva hora prevista: $(pretty_date "$new_target")."
+}
+extend_cmd() { with_lock extend_locked "$1"; }
 cancel_cmd() { with_lock cancel_locked; }
-internal_warning() { [[ -f "$STATE_FILE" ]] || exit 0; log_event 'warning_60_seconds'; notify 'Apagado en 60 segundos' 'Puedes cancelarlo con shutdown-timer cancel.'; }
-poweroff_command() { systemctl poweroff; }
+internal_warning() {
+  [[ -f "$STATE_FILE" && $(jq -r '.status // ""' "$STATE_FILE") == scheduled ]] || exit 0
+  local action; action=$(jq -r '.action // "poweroff"' "$STATE_FILE")
+  log_event "warning_$(grace_seconds)_seconds"; notify "$(action_label "$action") en $(grace_seconds) segundos" 'Puedes cancelarlo con shutdown-timer cancel.'
+}
+poweroff_command() {
+  case "$1" in
+    lock) omarchy-system-lock ;;
+    logout) omarchy-system-logout ;;
+    *) systemctl "$1" ;;
+  esac
+}
 internal_poweroff() {
   [[ -f "$STATE_FILE" ]] || exit 0
   [[ $(jq -r '.status // ""' "$STATE_FILE") == scheduled ]] || exit 0
+  local action; action=$(jq -r '.action // "poweroff"' "$STATE_FILE")
   jq '.status="powering_off"' "$STATE_FILE" > "$STATE_DIR/.powering.$$"; mv -f -- "$STATE_DIR/.powering.$$" "$STATE_FILE"
-  log_event 'poweroff_requested'; poweroff_command
+  log_event "action_requested=$action"; poweroff_command "$action"
 }
 show_logs() { [[ -f "$LOG_FILE" ]] && cat "$LOG_FILE" || note 'No hay eventos registrados.'; }
 show_config() {
@@ -169,17 +226,18 @@ EOF
 usage() { cat <<'EOF'
 Uso: shutdown-timer [OPCIÓN] COMANDO
 Duraciones directas: 30m, 45m, 1h, 3h, 4h
-Comandos: schedule DURACIÓN | status | cancel | menu | logs | config
-Opciones: --dry-run, --replace, --keep, --help
+Comandos: schedule DURACIÓN | extend DURACIÓN | status [--short] | cancel | menu | logs | config
+Opciones: --action poweroff|reboot|suspend|hibernate|lock|logout, --dry-run, --replace, --keep, --yes, --help
 EOF
 }
-DRY=false; REPLACE=''; YES=false
-while (($#)); do case "$1" in --dry-run) DRY=true; shift ;; --replace) REPLACE=replace; shift ;; --keep) REPLACE=keep; shift ;; --cancel) REPLACE=cancel; shift ;; --yes|-y) YES=true; shift ;; --internal-warning) internal_warning; exit ;; --internal-poweroff) internal_poweroff; exit ;; -h|--help) usage; exit 0 ;; *) break ;; esac; done
+DRY=false; REPLACE=''; YES=false; ACTION=poweroff
+while (($#)); do case "$1" in --dry-run) DRY=true; shift ;; --replace) REPLACE=replace; shift ;; --keep) REPLACE=keep; shift ;; --cancel) REPLACE=cancel; shift ;; --yes|-y) YES=true; shift ;; --action) [[ $# -ge 2 ]] || die 'falta valor para --action'; ACTION=$(validate_action "$2"); shift 2 ;; --action=*) ACTION=$(validate_action "${1#*=}"); shift ;; --internal-warning) internal_warning; exit ;; --internal-poweroff) internal_poweroff; exit ;; -h|--help) usage; exit 0 ;; *) break ;; esac; done
 command_name=${1:-menu}; shift || true
 case "$command_name" in
   30m|45m|1h|3h|4h|*m|*h) [[ $# -eq 0 ]] || die 'argumentos inesperados'; schedule_cmd "$command_name" "$DRY" "$REPLACE" ;;
   schedule) [[ $# -eq 1 ]] || die 'uso: shutdown-timer schedule DURACIÓN'; schedule_cmd "$1" "$DRY" "$REPLACE" ;;
-  status) [[ $# -eq 0 ]] || die 'uso: shutdown-timer status'; status_cmd "$DRY" ;;
+  status) case "${1:-}" in '') status_cmd false ;; --short) status_cmd true ;; *) die 'uso: shutdown-timer status [--short]' ;; esac ;;
+  extend) [[ $# -eq 1 ]] || die 'uso: shutdown-timer extend DURACIÓN'; extend_cmd "$1" ;;
   cancel) [[ $# -eq 0 ]] || die 'uso: shutdown-timer cancel'; cancel_cmd ;;
   menu) [[ $# -eq 0 ]] || die 'uso: shutdown-timer menu'; exec omarchy-shell shell summon "$PLUGIN_ID" '{}' ;;
   logs) [[ $# -eq 0 ]] || die 'uso: shutdown-timer logs'; show_logs ;;
