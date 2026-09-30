@@ -16,12 +16,13 @@ Item {
     property var shell: null
     property var manifest: null
     property bool closingFromHost: false
-    property string output: root.tr("Consultando el estado…")
+    property string output: ""
     property string customUnit: "m"
     property var scheduled: null
     property bool editing: false
     property var pendingAction: null
     property var pendingSchedule: null
+    property int tab: 0
     property string action: "poweroff"
     property bool hibernateAvailable: false
     readonly property bool confirming: pendingSchedule !== null
@@ -43,7 +44,13 @@ Item {
     }
     function pickAction(n) {
         var a = allActions[n - 1];
-        if (a && (a.key !== "hibernate" || hibernateAvailable)) action = a.key;
+        if (!a || (a.key === "hibernate" && !hibernateAvailable)) return;
+        if (tab === 0) runNow(a.key);
+        else action = a.key;
+    }
+    function runNow(key) {
+        if (actionInfo(key).confirm) pendingSchedule = {value: "now", mode: "", action: key};
+        else run(["--action", key, "now"]);
     }
     property double now: Date.now()
     readonly property bool hasSchedule: scheduled !== null && scheduled.status === "scheduled"
@@ -137,17 +144,18 @@ Item {
     }
     function schedule(value, mode) {
         if (value.trim() === "") return;
-        if (actionInfo(action).confirm) pendingSchedule = {value: value.trim(), mode: mode || "--replace"};
+        if (actionInfo(action).confirm) pendingSchedule = {value: value.trim(), mode: mode || "--replace", action: action};
         else doSchedule(value.trim(), mode || "--replace");
     }
-    function doSchedule(value, mode) {
-        if (value === "now") { run(["--action", action, "now"]); return; }
-        run(["--yes", "--action", action, mode, "schedule", value]);
+    function doSchedule(value, mode, act) {
+        var a = act || action;
+        if (value === "now") { run(["--action", a, "now"]); return; }
+        run(["--yes", "--action", a, mode, "schedule", value]);
     }
     function confirmPending() {
         var p = pendingSchedule;
         pendingSchedule = null;
-        if (p) doSchedule(p.value, p.mode);
+        if (p) doSchedule(p.value, p.mode, p.action);
     }
     function extend(value) {
         run(["extend", value]);
@@ -172,7 +180,7 @@ Item {
     Process {
         id: proc
         onExited: (exitCode, exitStatus) => {
-            root.output = exitCode === 0 ? root.tr("Operación terminada.") : root.tr("No se pudo completar la operación. Consulta los detalles.");
+            root.output = exitCode === 0 ? "" : root.tr("No se pudo completar la operación. Consulta los detalles.");
             stateFile.reload();
             root.now = Date.now();
             if (exitCode === 0 && command.indexOf("status") === -1) root.editing = false;
@@ -352,6 +360,21 @@ Item {
                 }
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.space(8)
+                Repeater {
+                    model: [{t: 0, label: root.tr("Acciones")}, {t: 1, label: root.tr("Programar")}]
+                    ActionButton {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: modelData.label
+                        primary: root.tab === modelData.t
+                        onClicked: root.tab = modelData.t
+                    }
+                }
+            }
+
             Controls.ScrollView {
                 id: scroll
                 Layout.fillWidth: true
@@ -365,7 +388,7 @@ Item {
                     spacing: Style.space(18)
 
                     Rectangle {
-                        visible: root.hasSchedule
+                        visible: root.tab === 1 && root.hasSchedule
                         Layout.fillWidth: true
                         implicitHeight: statusContent.implicitHeight + Style.space(36)
                         radius: Style.cornerRadius
@@ -433,7 +456,7 @@ Item {
                     }
 
                     Label {
-                        text: root.tr("Acción")
+                        text: root.tab === 0 ? root.tr("Se ejecuta al instante") : root.tr("Acción a programar")
                         font.bold: true
                     }
                     GridLayout {
@@ -449,18 +472,20 @@ Item {
                                 text: modelData.label
                                 glyph: modelData.glyph
                                 number: modelData.n
-                                selected: root.action === modelData.key
+                                selected: root.tab === 1 && root.action === modelData.key
                                 enabled: !root.busy
-                                onClicked: root.action = modelData.key
+                                onClicked: root.tab === 0 ? root.runNow(modelData.key) : (root.action = modelData.key)
                             }
                         }
                     }
 
                     Label {
+                        visible: root.tab === 1
                         text: root.tr("Duraciones rápidas")
                         font.bold: true
                     }
                     RowLayout {
+                        visible: root.tab === 1
                         Layout.fillWidth: true
                         spacing: Style.space(8)
                         Repeater {
@@ -468,8 +493,7 @@ Item {
                                 {label: root.tr("30 min"), value: "30m"},
                                 {label: root.tr("45 min"), value: "45m"},
                                 {label: root.tr("1 hora"), value: "1h"},
-                                {label: root.tr("2 horas"), value: "2h"},
-                                {label: root.tr("Ahora"), value: "now"}
+                                {label: root.tr("2 horas"), value: "2h"}
                             ]
                             ActionButton {
                                 required property var modelData
@@ -483,6 +507,7 @@ Item {
                     }
 
                     Rectangle {
+                        visible: root.tab === 1
                         Layout.fillWidth: true
                         implicitHeight: form.implicitHeight + Style.space(32)
                         radius: Style.cornerRadius
@@ -576,6 +601,7 @@ Item {
                     }
                     Label {
                         Layout.fillWidth: true
+                        visible: root.output !== ""
                         text: root.output
                         color: root.mutedInk
                         font.pixelSize: Style.font.caption
@@ -606,7 +632,7 @@ Item {
                     spacing: Style.space(16)
                     Label {
                         Layout.fillWidth: true
-                        text: root.pendingSchedule !== null ? (root.pendingSchedule.value === "now" ? root.tr("¿Ejecutar «%1» ahora?", [root.actionInfo(root.action).label]) : root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.action).label, root.pendingSchedule.value])) : ""
+                        text: root.pendingSchedule !== null ? (root.pendingSchedule.value === "now" ? root.tr("¿Ejecutar «%1» ahora?", [root.actionInfo(root.pendingSchedule.action).label]) : root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.pendingSchedule.action).label, root.pendingSchedule.value])) : ""
                         font.pixelSize: Style.font.title
                         font.bold: true
                     }

@@ -2,6 +2,10 @@
 
 var messages = {
   "es": {
+    "Acciones": "Acciones",
+    "Programar": "Programar",
+    "Se ejecuta al instante": "Se ejecuta al instante",
+    "Acción a programar": "Acción a programar",
     "Ahora": "Ahora",
     "¿Ejecutar «%1» ahora?": "¿Ejecutar «%1» ahora?",
     "Sí, ejecutar": "Sí, ejecutar",
@@ -62,6 +66,10 @@ var messages = {
     "Detalles técnicos": "Detalles técnicos"
   },
   "en": {
+    "Acciones": "Actions",
+    "Programar": "Schedule",
+    "Se ejecuta al instante": "Runs instantly",
+    "Acción a programar": "Action to schedule",
     "Ahora": "Now",
     "¿Ejecutar «%1» ahora?": "Run “%1” now?",
     "Sí, ejecutar": "Yes, run",
