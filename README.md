@@ -71,6 +71,19 @@ shutdown-timer status --short         # solo la cuenta regresiva (la usa el widg
 
 En el panel: `Alt+1`–`Alt+6` eligen la acción (Bloquear, Cerrar sesión, Suspender, Hibernar, Reiniciar, Apagar); `Hibernar` solo aparece si `omarchy-hibernation-available` lo permite. Programar cerrar sesión, reiniciar o apagar pide confirmación (`Enter` confirma, `Esc` cancela). Los botones «+15m/+30m/+1h» extienden el temporizador activo y el widget de barra muestra la cuenta regresiva.
 
+## Temporizadores con aviso
+
+Además del apagado, puedes crear temporizadores que solo avisan, con un recordatorio opcional. Pueden convivir varios y son independientes del apagado programado.
+
+```bash
+shutdown-timer timer 20m apagar la cocina   # avisa en 20 minutos
+shutdown-timer timer 1.5h                   # sin mensaje: "Han pasado 1.5h"
+shutdown-timer timers                       # lista los activos con el tiempo restante
+shutdown-timer timer-cancel ID              # cancela uno (o "all" para todos)
+```
+
+Al vencer se muestra una notificación crítica que no desaparece sola (`-u critical -t 0`) y suena `alarm-clock-elapsed`. El aviso se muestra aunque `notifications=false`. En el panel están en **Programar → Temporizador con aviso**, con atajos de 5, 10, 20 y 30 minutos y la lista de activos con su cuenta regresiva y un botón ✕ para cancelarlos. Los temporizadores son unidades de systemd de usuario, así que no sobreviven a un reinicio del equipo (al volver a consultar la lista se limpian los vencidos).
+
 ## Funcionamiento y seguridad
 
 Se crean dos unidades transitorias de systemd de usuario: una notifica cuando

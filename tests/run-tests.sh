@@ -16,6 +16,10 @@ cat > "$TMP/bin/systemctl" <<'EOF'
 printf 'systemctl %s\n' "$*" >> "$MOCK_LOG"
 case "$*" in *'is-active'*) exit 1 ;; *) exit 0 ;; esac
 EOF
+cat > "$TMP/bin/paplay" <<'MOCKEOF'
+#!/usr/bin/env bash
+printf 'paplay %s\n' "$*" >> "$MOCK_LOG"
+MOCKEOF
 cat > "$TMP/bin/notify-send" <<'EOF'
 #!/usr/bin/env bash
 printf 'notify-send %s\n' "$*" >> "$MOCK_LOG"
@@ -64,4 +68,17 @@ assert_fail "$CLI" --dry-run extend 30m; ok 'extender sin temporizador falla'
 [[ -z $($CLI --dry-run status --short) ]] || fail 'short vacío'; ok 'status --short vacío sin temporizador'
 $CLI --dry-run --action lock now | grep -q 'SIMULACIÓN' || fail 'now'; ok 'now en simulación'
 assert_fail "$CLI" --dry-run --action formatear now; ok 'now rechaza acción inválida'
+out=$($CLI timer 20m apagar la cocina); grep -q 'apagar la cocina' <<<"$out" || fail 'crear timer'; ok 'crear temporizador con mensaje'
+$CLI timer 5m >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 2 ]] || fail 'dos timers'; ok 'varios temporizadores a la vez'
+grep -q 'shutdown-timer-alarm-' "$LOG" || fail 'systemd-run alarm'; ok 'crea unidad systemd por temporizador'
+$CLI timers | grep -q 'apagar la cocina' || fail 'listar'; ok 'listar temporizadores'
+assert_fail "$CLI" timer texto; ok 'rechazar duración inválida en timer'
+assert_fail "$CLI" timer-cancel noexiste; ok 'cancelar id inexistente falla'
+id=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json")
+: > "$LOG"; "$CLI" --internal-alarm "$id"; grep -q 'notify-send.*-u critical' "$LOG" || fail 'alerta'; grep -q 'paplay' "$LOG" || fail 'sonido'; ok 'al vencer avisa con notificación crítica y sonido'
+[[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 1 ]] || fail 'quitar disparado'; ok 'temporizador disparado se elimina'
+: > "$LOG"; "$CLI" --internal-alarm "$id"; ! grep -q notify-send "$LOG" || fail 'doble alerta'; ok 'no avisa dos veces'
+id2=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json"); $CLI timer-cancel "$id2" >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'cancelar'; ok 'cancelar temporizador'
+$CLI timer 1h >/dev/null; $CLI timer 2h >/dev/null; $CLI timer-cancel all >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'cancelar todos'; ok 'cancelar todos'
+$CLI timers | grep -q 'No hay' || fail 'vacío'; ok 'lista vacía'
 printf '\n%d pruebas superadas\n' "$pass"

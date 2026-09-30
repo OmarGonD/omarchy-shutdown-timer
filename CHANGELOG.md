@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-09-30
+
+- Temporizadores con aviso y recordatorio opcional: `timer`, `timers` y `timer-cancel`, varios a la vez.
+- Notificación crítica persistente y sonido al vencer.
+- Panel: sección «Temporizador con aviso» en Programar con lista de activos y cuenta regresiva.
+- Pestañas Acciones/Programar reordenables (arrastrar o `Ctrl+←/→`); comando `now` y acciones inmediatas.
+
 ## 0.2.0 - 2026-09-30
 
 - Nuevo `--action poweroff|reboot|suspend|hibernate` (inspirado en omarchy-power-menu).

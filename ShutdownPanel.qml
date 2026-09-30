@@ -23,6 +23,27 @@ Item {
     property var pendingAction: null
     property var pendingSchedule: null
     property int tab: 0
+    property var alarms: []
+    readonly property var activeAlarms: alarms
+        .filter(function (a) { return a.target_epoch * 1000 > now - 5000; })
+        .sort(function (a, b) { return a.target_epoch - b.target_epoch; })
+    function pad(n) { return (n < 10 ? "0" : "") + n; }
+    function fmtLeft(target) {
+        var sec = Math.max(0, Math.round(target - now / 1000));
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+        return h > 0 ? h + "h " + pad(m) + "m" : pad(m) + ":" + pad(sec % 60);
+    }
+    function startTimer() {
+        var t = timerInput.text.trim().toLowerCase().replace(",", ".");
+        if (/^\d+(\.\d+)?$/.test(t)) t += "m";
+        if (!/^\d+(\.\d+)?(m|h)$/.test(t) || parseFloat(t) <= 0) {
+            output = root.tr("Usa 20, 20m o 1.5h");
+            timerInput.forceActiveFocus();
+            return;
+        }
+        var msg = timerMessage.text.trim();
+        run(["timer", t].concat(msg !== "" ? [msg] : []));
+    }
     property var tabOrder: [0, 1]
     function moveTab(id, dir) {
         var o = tabOrder.slice(), i = o.indexOf(id), j = i + dir;
@@ -88,6 +109,25 @@ Item {
                 if (Array.isArray(o) && o.length === 2 && o.indexOf(0) >= 0 && o.indexOf(1) >= 0) root.tabOrder = o;
             } catch (error) {}
         }
+    }
+
+    FileView {
+        id: alarmsFile
+        path: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/shutdown-timer/alarms.json"
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: {
+            try { root.alarms = JSON.parse(text()); }
+            catch (error) { root.alarms = []; }
+        }
+        onLoadFailed: root.alarms = []
+    }
+
+    Timer {
+        interval: 1000
+        running: root.opened && root.tab === 1 && root.activeAlarms.length > 0
+        repeat: true
+        onTriggered: root.now = Date.now()
     }
 
     FileView {
@@ -203,6 +243,8 @@ Item {
         onExited: (exitCode, exitStatus) => {
             root.output = exitCode === 0 ? "" : root.tr("No se pudo completar la operación. Consulta los detalles.");
             stateFile.reload();
+            alarmsFile.reload();
+            if (exitCode === 0 && command.indexOf("timer") === 1) { timerInput.text = ""; timerMessage.text = ""; }
             root.now = Date.now();
             if (exitCode === 0 && command.indexOf("status") === -1) root.editing = false;
             if (root.pendingAction !== null) {
@@ -529,6 +571,12 @@ Item {
 
                     Label {
                         visible: root.tab === 1
+                        text: root.tr("Apagar el equipo")
+                        font.pixelSize: Style.font.title
+                        font.bold: true
+                    }
+                    Label {
+                        visible: root.tab === 1
                         text: root.tr("Duraciones rápidas")
                         font.bold: true
                     }
@@ -636,6 +684,125 @@ Item {
                                 primary: true
                                 enabled: !root.busy
                                 onClicked: root.scheduleCustom()
+                            }
+                        }
+                    }
+                    Label {
+                        visible: root.tab === 1
+                        text: root.tr("Temporizador con aviso")
+                        font.pixelSize: Style.font.title
+                        font.bold: true
+                    }
+                    Rectangle {
+                        visible: root.tab === 1
+                        Layout.fillWidth: true
+                        implicitHeight: timerForm.implicitHeight + Style.space(32)
+                        radius: Style.cornerRadius
+                        color: root.card
+                        border.color: root.hairline
+                        ColumnLayout {
+                            id: timerForm
+                            anchors.fill: parent
+                            anchors.margins: Style.space(16)
+                            spacing: Style.space(12)
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Style.space(8)
+                                Repeater {
+                                    model: ["5m", "10m", "20m", "30m"]
+                                    ActionButton {
+                                        required property string modelData
+                                        Layout.fillWidth: true
+                                        implicitWidth: Style.space(60)
+                                        text: modelData.replace("m", " min")
+                                        primary: timerInput.text.trim() === modelData
+                                        enabled: !root.busy
+                                        onClicked: timerInput.text = modelData
+                                    }
+                                }
+                            }
+                            Controls.TextField {
+                                id: timerInput
+                                Layout.fillWidth: true
+                                implicitHeight: Style.space(38)
+                                placeholderText: root.tr("Ej. 20 min · 1.5h")
+                                color: root.ink
+                                placeholderTextColor: root.mutedInk
+                                selectionColor: root.accent
+                                selectedTextColor: root.canvas
+                                font.family: Style.font.menuFamily
+                                font.pixelSize: Style.font.body
+                                selectByMouse: true
+                                enabled: !root.busy
+                                background: Rectangle {
+                                    radius: Style.cornerRadius
+                                    color: root.canvas
+                                    border.width: timerInput.activeFocus ? 2 : 1
+                                    border.color: timerInput.activeFocus ? root.accent : root.hairline
+                                }
+                                onAccepted: timerMessage.forceActiveFocus()
+                            }
+                            Controls.TextField {
+                                id: timerMessage
+                                Layout.fillWidth: true
+                                implicitHeight: Style.space(38)
+                                placeholderText: root.tr("Recordatorio opcional, ej. apagar la cocina")
+                                color: root.ink
+                                placeholderTextColor: root.mutedInk
+                                selectionColor: root.accent
+                                selectedTextColor: root.canvas
+                                font.family: Style.font.menuFamily
+                                font.pixelSize: Style.font.body
+                                selectByMouse: true
+                                enabled: !root.busy
+                                background: Rectangle {
+                                    radius: Style.cornerRadius
+                                    color: root.canvas
+                                    border.width: timerMessage.activeFocus ? 2 : 1
+                                    border.color: timerMessage.activeFocus ? root.accent : root.hairline
+                                }
+                                onAccepted: root.startTimer()
+                            }
+                            ActionButton {
+                                Layout.fillWidth: true
+                                text: root.tr("Iniciar temporizador")
+                                primary: true
+                                enabled: !root.busy
+                                onClicked: root.startTimer()
+                            }
+                            Label {
+                                visible: root.activeAlarms.length > 0
+                                text: root.tr("Temporizadores activos")
+                                font.bold: true
+                            }
+                            Repeater {
+                                model: root.activeAlarms
+                                RowLayout {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    spacing: Style.space(10)
+                                    Label {
+                                        text: root.fmtLeft(modelData.target_epoch)
+                                        color: root.accent
+                                        font.bold: true
+                                        wrapMode: Text.NoWrap
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.message !== "" ? modelData.message : root.tr("Sin mensaje")
+                                        color: modelData.message !== "" ? root.ink : root.mutedInk
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                    }
+                                    ActionButton {
+                                        text: "✕"
+                                        implicitWidth: Style.space(42)
+                                        destructive: true
+                                        Accessible.name: root.tr("Cancelar temporizador")
+                                        enabled: !root.busy
+                                        onClicked: root.run(["timer-cancel", modelData.id])
+                                    }
+                                }
                             }
                         }
                     }

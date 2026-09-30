@@ -2,6 +2,15 @@
 
 var messages = {
   "es": {
+    "Apagar el equipo": "Apagar el equipo",
+    "Temporizador con aviso": "Temporizador con aviso",
+    "Ej. 20 min · 1.5h": "Ej. 20 min · 1.5h",
+    "Recordatorio opcional, ej. apagar la cocina": "Recordatorio opcional, ej. apagar la cocina",
+    "Iniciar temporizador": "Iniciar temporizador",
+    "Temporizadores activos": "Temporizadores activos",
+    "Cancelar temporizador": "Cancelar temporizador",
+    "Usa 20, 20m o 1.5h": "Usa 20, 20m o 1.5h",
+    "Sin mensaje": "Sin mensaje",
     "Acciones": "Acciones",
     "Programar": "Programar",
     "Se ejecuta al instante": "Se ejecuta al instante",
@@ -66,6 +75,15 @@ var messages = {
     "Detalles técnicos": "Detalles técnicos"
   },
   "en": {
+    "Apagar el equipo": "Shut down the computer",
+    "Temporizador con aviso": "Timer with alert",
+    "Ej. 20 min · 1.5h": "E.g. 20 min · 1.5h",
+    "Recordatorio opcional, ej. apagar la cocina": "Optional reminder, e.g. turn off the stove",
+    "Iniciar temporizador": "Start timer",
+    "Temporizadores activos": "Active timers",
+    "Cancelar temporizador": "Cancel timer",
+    "Usa 20, 20m o 1.5h": "Use 20, 20m or 1.5h",
+    "Sin mensaje": "No message",
     "Acciones": "Actions",
     "Programar": "Schedule",
     "Se ejecuta al instante": "Runs instantly",

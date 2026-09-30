@@ -205,6 +205,85 @@ now_cmd() {
   log_event "now action=$ACTION"
   poweroff_command "$ACTION"
 }
+ALARMS_FILE="$STATE_DIR/alarms.json"
+alarm_unit() { printf 'shutdown-timer-alarm-%s' "$1"; }
+alarm_unit_active() { systemctl --user is-active --quiet "$(alarm_unit "$1").timer"; }
+with_alarm_lock() {
+  ensure_dirs
+  exec 8>"$STATE_DIR/.alarms.lock"
+  flock -w 10 8 || die 'no se pudo acceder a los temporizadores; inténtalo de nuevo'
+  "$@"
+}
+alarms_read() { { [[ -s $ALARMS_FILE ]] && jq -c '.' "$ALARMS_FILE" 2>/dev/null; } || printf '[]\n'; }
+alarms_write() {
+  local tmp="$STATE_DIR/.alarms.json.tmp.$$"
+  printf '%s\n' "$1" > "$tmp"; mv -f -- "$tmp" "$ALARMS_FILE"
+}
+# Quita temporizadores vencidos cuya unidad ya no existe (p. ej. tras reiniciar).
+cleanup_alarms_locked() {
+  local list id now; list=$(alarms_read); now=$(now_epoch)
+  for id in $(jq -r --argjson n "$now" '.[] | select(.target_epoch < ($n - 30)) | .id' <<<"$list"); do
+    alarm_unit_active "$id" || list=$(jq -c --arg i "$id" 'map(select(.id != $i))' <<<"$list")
+  done
+  alarms_write "$list"
+}
+alert() {
+  command -v notify-send >/dev/null 2>&1 && notify-send -u critical -t 0 --app-name='Shutdown Timer' -i alarm-clock "$1" "$2" >/dev/null 2>&1 || true
+  local sound=/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga
+  if command -v paplay >/dev/null 2>&1 && [[ -f $sound ]]; then timeout 6 paplay "$sound" >/dev/null 2>&1 || true; fi
+}
+alarm_add_locked() {
+  local raw=$1 message=$2 seconds id target unit
+  seconds=$(validate_duration "$raw"); cleanup_alarms_locked
+  target=$(( $(now_epoch) + seconds ))
+  if [[ $DRY == true ]]; then
+    note "SIMULACIÓN: temporizador de $(format_duration "$seconds")${message:+ con aviso: $message} (termina $(pretty_date "$target"))."
+    return 0
+  fi
+  id="$(now_epoch)$((RANDOM % 900 + 100))"; unit=$(alarm_unit "$id")
+  systemd-run --user --unit="$unit" --on-active="${seconds}s" --timer-property=AccuracySec=1s --collect -- "$SELF" --internal-alarm "$id" >/dev/null 2>&1 \
+    || die 'no se pudo crear el temporizador'
+  alarms_write "$(alarms_read | jq -c --arg i "$id" --arg d "$raw" --arg m "$message" --argjson s "$seconds" --argjson t "$target" --arg u "$unit" '. + [{id:$i,duration:$d,duration_seconds:$s,target_epoch:$t,message:$m,unit:$u}]')"
+  log_event "alarm_scheduled id=$id duration=$raw target_epoch=$target"
+  note "Temporizador $id: $(format_duration "$seconds")${message:+ — $message}. Termina: $(pretty_date "$target")"
+}
+alarm_add() { with_alarm_lock alarm_add_locked "$@"; }
+internal_alarm_locked() {
+  local id=$1 entry message duration
+  entry=$(alarms_read | jq -c --arg i "$id" '.[] | select(.id == $i)')
+  [[ -n $entry ]] || return 0
+  message=$(jq -r '.message // ""' <<<"$entry"); duration=$(jq -r '.duration' <<<"$entry")
+  alarms_write "$(alarms_read | jq -c --arg i "$id" 'map(select(.id != $i))')"
+  log_event "alarm_fired id=$id"
+  alert 'Temporizador terminado' "${message:-Han pasado $duration}"
+}
+internal_alarm() { with_alarm_lock internal_alarm_locked "$1"; }
+timers_locked() {
+  cleanup_alarms_locked
+  local now count id left msg; now=$(now_epoch); count=$(alarms_read | jq 'length')
+  ((count > 0)) || { note 'No hay temporizadores activos.'; return 0; }
+  while IFS=$'\t' read -r id left msg; do
+    ((left < 0)) && left=0
+    printf '%s  %s  %s\n' "$id" "$(format_remaining "$left")" "${msg:-(sin mensaje)}"
+  done < <(alarms_read | jq -r --argjson n "$now" 'sort_by(.target_epoch) | .[] | [.id, (.target_epoch - $n), .message] | @tsv')
+}
+timers_cmd() { with_alarm_lock timers_locked; }
+timer_cancel_locked() {
+  local target=$1 ids id
+  if [[ $target == all ]]; then ids=$(alarms_read | jq -r '.[].id')
+  else
+    alarms_read | jq -e --arg i "$target" 'any(.[]; .id == $i)' >/dev/null || die "no existe el temporizador '$target'"
+    ids=$target
+  fi
+  for id in $ids; do
+    systemctl --user stop "$(alarm_unit "$id").timer" "$(alarm_unit "$id").service" >/dev/null 2>&1 || true
+    systemctl --user reset-failed "$(alarm_unit "$id").timer" "$(alarm_unit "$id").service" >/dev/null 2>&1 || true
+    alarms_write "$(alarms_read | jq -c --arg i "$id" 'map(select(.id != $i))')"
+    log_event "alarm_cancelled id=$id"
+  done
+  note 'Temporizador cancelado.'
+}
+timer_cancel_cmd() { with_alarm_lock timer_cancel_locked "$1"; }
 cancel_cmd() { with_lock cancel_locked; }
 internal_warning() {
   [[ -f "$STATE_FILE" ]] || return 0
@@ -248,17 +327,20 @@ EOF
 usage() { cat <<'EOF'
 Uso: shutdown-timer [OPCIÓN] COMANDO
 Duraciones directas: 30m, 45m, 1h, 3h, 4h
-Comandos: schedule DURACIÓN | now | extend DURACIÓN | status [--short] | cancel | menu | logs | config
+Comandos: timer DURACIÓN [MENSAJE] | timers | timer-cancel ID|all | schedule DURACIÓN | now | extend DURACIÓN | status [--short] | cancel | menu | logs | config
 Opciones: --action poweroff|reboot|suspend|hibernate|lock|logout, --dry-run, --replace, --keep, --yes, --help
 EOF
 }
 DRY=false; REPLACE=''; YES=false; ACTION=poweroff
-while (($#)); do case "$1" in --dry-run) DRY=true; shift ;; --replace) REPLACE=replace; shift ;; --keep) REPLACE=keep; shift ;; --cancel) REPLACE=cancel; shift ;; --yes|-y) YES=true; shift ;; --action) [[ $# -ge 2 ]] || die 'falta valor para --action'; ACTION=$(validate_action "$2"); shift 2 ;; --action=*) ACTION=$(validate_action "${1#*=}"); shift ;; --internal-warning) internal_warning; exit ;; --internal-poweroff) internal_poweroff; exit ;; -h|--help) usage; exit 0 ;; *) break ;; esac; done
+while (($#)); do case "$1" in --dry-run) DRY=true; shift ;; --replace) REPLACE=replace; shift ;; --keep) REPLACE=keep; shift ;; --cancel) REPLACE=cancel; shift ;; --yes|-y) YES=true; shift ;; --action) [[ $# -ge 2 ]] || die 'falta valor para --action'; ACTION=$(validate_action "$2"); shift 2 ;; --action=*) ACTION=$(validate_action "${1#*=}"); shift ;; --internal-warning) internal_warning; exit ;; --internal-poweroff) internal_poweroff; exit ;; --internal-alarm) internal_alarm "${2:-}"; exit ;; -h|--help) usage; exit 0 ;; *) break ;; esac; done
 command_name=${1:-menu}; shift || true
 case "$command_name" in
   30m|45m|1h|3h|4h|*m|*h) [[ $# -eq 0 ]] || die 'argumentos inesperados'; schedule_cmd "$command_name" "$DRY" "$REPLACE" ;;
   schedule) [[ $# -eq 1 ]] || die 'uso: shutdown-timer schedule DURACIÓN'; schedule_cmd "$1" "$DRY" "$REPLACE" ;;
   status) case "${1:-}" in '') status_cmd false ;; --short) status_cmd true ;; *) die 'uso: shutdown-timer status [--short]' ;; esac ;;
+  timer) [[ $# -ge 1 ]] || die 'uso: shutdown-timer timer DURACIÓN [MENSAJE]'; alarm_dur=$1; shift; alarm_add "$alarm_dur" "$*" ;;
+  timers) [[ $# -eq 0 ]] || die 'uso: shutdown-timer timers'; timers_cmd ;;
+  timer-cancel) [[ $# -eq 1 ]] || die 'uso: shutdown-timer timer-cancel ID|all'; timer_cancel_cmd "$1" ;;
   now) [[ $# -eq 0 ]] || die 'uso: shutdown-timer --action ACCIÓN now'; now_cmd ;;
   extend) [[ $# -eq 1 ]] || die 'uso: shutdown-timer extend DURACIÓN'; extend_cmd "$1" ;;
   cancel) [[ $# -eq 0 ]] || die 'uso: shutdown-timer cancel'; cancel_cmd ;;
