@@ -23,6 +23,15 @@ Item {
     property var pendingAction: null
     property var pendingSchedule: null
     property int tab: 0
+    property var tabOrder: [0, 1]
+    function moveTab(id, dir) {
+        var o = tabOrder.slice(), i = o.indexOf(id), j = i + dir;
+        if (i < 0 || j < 0 || j >= o.length) return;
+        o.splice(i, 1);
+        o.splice(j, 0, id);
+        tabOrder = o;
+        uiFile.setText(JSON.stringify({tabOrder: o}));
+    }
     property string action: "poweroff"
     property bool hibernateAvailable: false
     readonly property bool confirming: pendingSchedule !== null
@@ -71,6 +80,17 @@ Item {
     }
 
     FileView {
+        id: uiFile
+        path: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/shutdown-timer/ui.json"
+        onLoaded: {
+            try {
+                var o = JSON.parse(text()).tabOrder;
+                if (Array.isArray(o) && o.length === 2 && o.indexOf(0) >= 0 && o.indexOf(1) >= 0) root.tabOrder = o;
+            } catch (error) {}
+        }
+    }
+
+    FileView {
         id: stateFile
         path: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/shutdown-timer/state.json"
         watchChanges: true
@@ -105,6 +125,7 @@ Item {
         now = Date.now();
         closingFromHost = false;
         window.visible = true;
+        tab = tabOrder[0];
         hibernateProbe.running = true;
         refresh();
         Qt.callLater(function () {
@@ -314,12 +335,14 @@ Item {
             enabled: root.opened && root.pendingSchedule !== null
             onActivated: root.confirmPending()
         }
-        Shortcut { sequence: "Alt+1"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(1) }
-        Shortcut { sequence: "Alt+2"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(2) }
-        Shortcut { sequence: "Alt+3"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(3) }
-        Shortcut { sequence: "Alt+4"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(4) }
-        Shortcut { sequence: "Alt+5"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(5) }
-        Shortcut { sequence: "Alt+6"; enabled: root.opened && !root.confirming; onActivated: root.pickAction(6) }
+        Shortcut { sequence: "Ctrl+Left"; enabled: root.opened && !root.confirming; onActivated: root.moveTab(root.tab, -1) }
+        Shortcut { sequence: "Ctrl+Right"; enabled: root.opened && !root.confirming; onActivated: root.moveTab(root.tab, 1) }
+        Shortcut { sequence: "Alt+1"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(1) }
+        Shortcut { sequence: "Alt+2"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(2) }
+        Shortcut { sequence: "Alt+3"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(3) }
+        Shortcut { sequence: "Alt+4"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(4) }
+        Shortcut { sequence: "Alt+5"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(5) }
+        Shortcut { sequence: "Alt+6"; enabled: root.opened && !root.confirming && root.tab === 0; onActivated: root.pickAction(6) }
 
         ColumnLayout {
             anchors.fill: parent
@@ -364,13 +387,37 @@ Item {
                 Layout.fillWidth: true
                 spacing: Style.space(8)
                 Repeater {
-                    model: [{t: 0, label: root.tr("Acciones")}, {t: 1, label: root.tr("Programar")}]
-                    ActionButton {
+                    model: root.tabOrder.map(function (id) { return {t: id, label: id === 0 ? root.tr("Acciones") : root.tr("Programar")}; })
+                    Rectangle {
+                        id: tabItem
                         required property var modelData
+                        readonly property bool current: root.tab === modelData.t
                         Layout.fillWidth: true
-                        text: modelData.label
-                        primary: root.tab === modelData.t
-                        onClicked: root.tab = modelData.t
+                        implicitHeight: Style.space(38)
+                        radius: Style.cornerRadius
+                        color: current ? root.accent : Util.alpha(root.ink, tabArea.containsMouse ? 0.09 : 0.04)
+                        border.width: 1
+                        border.color: current ? root.accent : root.hairline
+                        Text {
+                            anchors.centerIn: parent
+                            text: tabItem.modelData.label
+                            color: tabItem.current ? root.canvas : root.ink
+                            font.family: Style.font.menuFamily
+                            font.pixelSize: Style.font.body
+                        }
+                        MouseArea {
+                            id: tabArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            property real pressX: 0
+                            onPressed: mouse => pressX = mapToItem(null, mouse.x, 0).x
+                            onReleased: mouse => {
+                                var dx = mapToItem(null, mouse.x, 0).x - pressX;
+                                if (Math.abs(dx) > tabItem.width * 0.4) root.moveTab(tabItem.modelData.t, dx > 0 ? 1 : -1);
+                                else root.tab = tabItem.modelData.t;
+                            }
+                        }
                     }
                 }
             }
@@ -456,10 +503,12 @@ Item {
                     }
 
                     Label {
-                        text: root.tab === 0 ? root.tr("Se ejecuta al instante") : root.tr("Acción a programar")
+                        visible: root.tab === 0
+                        text: root.tr("Se ejecuta al instante")
                         font.bold: true
                     }
                     GridLayout {
+                        visible: root.tab === 0
                         Layout.fillWidth: true
                         columns: 3
                         columnSpacing: Style.space(8)
@@ -472,9 +521,8 @@ Item {
                                 text: modelData.label
                                 glyph: modelData.glyph
                                 number: modelData.n
-                                selected: root.tab === 1 && root.action === modelData.key
-                                enabled: !root.busy
-                                onClicked: root.tab === 0 ? root.runNow(modelData.key) : (root.action = modelData.key)
+                                                                enabled: !root.busy
+                                onClicked: root.runNow(modelData.key)
                             }
                         }
                     }
