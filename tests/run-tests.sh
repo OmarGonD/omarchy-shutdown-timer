@@ -3,7 +3,8 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-export HOME="$TMP/home" XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.state" XDG_RUNTIME_DIR="$TMP/run"
+export HOME="$TMP/home"
+export XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.state" XDG_RUNTIME_DIR="$TMP/run"
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$TMP/bin"
 LOG="$TMP/mock.log"
 cat > "$TMP/bin/systemd-run" <<'EOF'
@@ -61,4 +62,6 @@ $CLI --dry-run extend 30m >/dev/null; grep -q 'duration":"30m+30m' "$XDG_STATE_H
 $CLI --dry-run cancel >/dev/null
 assert_fail "$CLI" --dry-run extend 30m; ok 'extender sin temporizador falla'
 [[ -z $($CLI --dry-run status --short) ]] || fail 'short vacío'; ok 'status --short vacío sin temporizador'
+$CLI --dry-run --action lock now | grep -q 'SIMULACIÓN' || fail 'now'; ok 'now en simulación'
+assert_fail "$CLI" --dry-run --action formatear now; ok 'now rechaza acción inválida'
 printf '\n%d pruebas superadas\n' "$pass"

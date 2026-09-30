@@ -200,6 +200,11 @@ extend_locked() {
   notify 'Temporizador extendido' "Nueva hora prevista: $(pretty_date "$new_target")."
 }
 extend_cmd() { with_lock extend_locked "$1"; }
+now_cmd() {
+  if [[ $DRY == true ]]; then note "SIMULACIÓN: ejecutaría ahora la acción: $ACTION"; return 0; fi
+  log_event "now action=$ACTION"
+  poweroff_command "$ACTION"
+}
 cancel_cmd() { with_lock cancel_locked; }
 internal_warning() {
   [[ -f "$STATE_FILE" ]] || return 0
@@ -243,7 +248,7 @@ EOF
 usage() { cat <<'EOF'
 Uso: shutdown-timer [OPCIÓN] COMANDO
 Duraciones directas: 30m, 45m, 1h, 3h, 4h
-Comandos: schedule DURACIÓN | extend DURACIÓN | status [--short] | cancel | menu | logs | config
+Comandos: schedule DURACIÓN | now | extend DURACIÓN | status [--short] | cancel | menu | logs | config
 Opciones: --action poweroff|reboot|suspend|hibernate|lock|logout, --dry-run, --replace, --keep, --yes, --help
 EOF
 }
@@ -254,6 +259,7 @@ case "$command_name" in
   30m|45m|1h|3h|4h|*m|*h) [[ $# -eq 0 ]] || die 'argumentos inesperados'; schedule_cmd "$command_name" "$DRY" "$REPLACE" ;;
   schedule) [[ $# -eq 1 ]] || die 'uso: shutdown-timer schedule DURACIÓN'; schedule_cmd "$1" "$DRY" "$REPLACE" ;;
   status) case "${1:-}" in '') status_cmd false ;; --short) status_cmd true ;; *) die 'uso: shutdown-timer status [--short]' ;; esac ;;
+  now) [[ $# -eq 0 ]] || die 'uso: shutdown-timer --action ACCIÓN now'; now_cmd ;;
   extend) [[ $# -eq 1 ]] || die 'uso: shutdown-timer extend DURACIÓN'; extend_cmd "$1" ;;
   cancel) [[ $# -eq 0 ]] || die 'uso: shutdown-timer cancel'; cancel_cmd ;;
   menu) [[ $# -eq 0 ]] || die 'uso: shutdown-timer menu'; exec omarchy-shell shell summon "$PLUGIN_ID" '{}' ;;

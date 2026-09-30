@@ -2,6 +2,9 @@
 
 var messages = {
   "es": {
+    "Ahora": "Ahora",
+    "¿Ejecutar «%1» ahora?": "¿Ejecutar «%1» ahora?",
+    "Sí, ejecutar": "Sí, ejecutar",
     "Acción": "Acción",
     "Bloquear": "Bloquear",
     "Cerrar sesión": "Cerrar sesión",
@@ -59,6 +62,9 @@ var messages = {
     "Detalles técnicos": "Detalles técnicos"
   },
   "en": {
+    "Ahora": "Now",
+    "¿Ejecutar «%1» ahora?": "Run “%1” now?",
+    "Sí, ejecutar": "Yes, run",
     "Acción": "Action",
     "Bloquear": "Lock",
     "Cerrar sesión": "Log out",

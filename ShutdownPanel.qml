@@ -141,6 +141,7 @@ Item {
         else doSchedule(value.trim(), mode || "--replace");
     }
     function doSchedule(value, mode) {
+        if (value === "now") { run(["--action", action, "now"]); return; }
         run(["--yes", "--action", action, mode, "schedule", value]);
     }
     function confirmPending() {
@@ -467,7 +468,8 @@ Item {
                                 {label: root.tr("30 min"), value: "30m"},
                                 {label: root.tr("45 min"), value: "45m"},
                                 {label: root.tr("1 hora"), value: "1h"},
-                                {label: root.tr("2 horas"), value: "2h"}
+                                {label: root.tr("2 horas"), value: "2h"},
+                                {label: root.tr("Ahora"), value: "now"}
                             ]
                             ActionButton {
                                 required property var modelData
@@ -604,7 +606,7 @@ Item {
                     spacing: Style.space(16)
                     Label {
                         Layout.fillWidth: true
-                        text: root.pendingSchedule !== null ? root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.action).label, root.pendingSchedule.value]) : ""
+                        text: root.pendingSchedule !== null ? (root.pendingSchedule.value === "now" ? root.tr("¿Ejecutar «%1» ahora?", [root.actionInfo(root.action).label]) : root.tr("¿Programar «%1» en %2?", [root.actionInfo(root.action).label, root.pendingSchedule.value])) : ""
                         font.pixelSize: Style.font.title
                         font.bold: true
                     }
@@ -622,7 +624,7 @@ Item {
                         }
                         ActionButton {
                             Layout.fillWidth: true
-                            text: root.tr("Sí, programar")
+                            text: root.pendingSchedule !== null && root.pendingSchedule.value === "now" ? root.tr("Sí, ejecutar") : root.tr("Sí, programar")
                             destructive: true
                             primary: true
                             onClicked: root.confirmPending()
