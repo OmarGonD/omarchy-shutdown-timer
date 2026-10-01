@@ -97,10 +97,53 @@ write_state() {
   atomic_state "$(jq -cn --arg c "$(timestamp)" --arg d "$raw" --argjson s "$seconds" --argjson t "$target" --arg w "$WARNING_UNIT" --arg p "$POWEROFF_UNIT" --arg m "$mode" --arg a "$action" '{created_at:$c,duration:$d,duration_seconds:$s,target_epoch:$t,target_at:($t|todateiso8601),warning_unit:$w,poweroff_unit:$p,action:$a,mode:$m,status:"scheduled"}')"
 }
 units_active() { systemctl --user is-active --quiet "${WARNING_UNIT%.service}.timer" "${POWEROFF_UNIT%.service}.timer" "$WARNING_UNIT" "$POWEROFF_UNIT"; }
+# Which side owns a user unit: absent | ours | foreign.
+# "ours" means a transient unit systemd-run created for this CLI: Transient=yes, a
+# fragment in the runtime transient dir, Description "[systemd-run] <path>/shutdown-timer
+# --internal-<mode>" and, for services, an ExecStart whose argv is that same command.
+# A unit that merely shares one of our names (a user unit, a repurposed name) is foreign.
+unit_owner() { # unit mode ("warning" | "poweroff" | "alarm <id>")
+  local unit=$1 mode=$2 line load="" transient="" frag="" desc="" exec_start=""
+  while IFS= read -r line; do
+    case $line in
+      LoadState=*) load=${line#*=} ;;
+      Transient=*) transient=${line#*=} ;;
+      FragmentPath=*) frag=${line#*=} ;;
+      Description=*) desc=${line#*=} ;;
+      ExecStart=*) exec_start=${line#*=} ;;
+    esac
+  done < <(systemctl --user show -p LoadState -p Transient -p FragmentPath -p Description -p ExecStart "$unit" 2>/dev/null)
+  if [[ -z $load || $load == not-found ]]; then echo absent; return; fi
+  if [[ $load != loaded || $transient != yes || $frag != */systemd/transient/* || $desc != "[systemd-run] "*"/shutdown-timer --internal-$mode" ]]; then echo foreign; return; fi
+  if [[ $unit == *.service && $exec_start != *"argv[]="*"/shutdown-timer --internal-$mode ;"* ]]; then echo foreign; return; fi
+  echo ours
+}
+# Stops "unit|mode" pairs, but only when every one of them is absent or ours. If any is
+# foreign nothing is stopped (the conflict is reported and preserved) and 1 is returned.
+stop_owned_units() {
+  local pair unit mode conflict=0
+  for pair in "$@"; do
+    unit=${pair%%|*}; mode=${pair#*|}
+    if [[ $(unit_owner "$unit" "$mode") == foreign ]]; then
+      conflict=1; log_event "unit_conflict unit=$unit"
+      printf 'shutdown-timer: la unidad %s ya existe y no fue creada por este plugin; no se modificó.\n' "$unit" >&2
+    fi
+  done
+  ((conflict == 0)) || return 1
+  for pair in "$@"; do
+    unit=${pair%%|*}; mode=${pair#*|}
+    [[ $(unit_owner "$unit" "$mode") == ours ]] || continue # re-checked right before stopping
+    systemctl --user stop "$unit" >/dev/null 2>&1 || true
+    systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+  done
+}
+# Timers must stop too: stopping only a service leaves its trigger armed.
 clear_units() {
-  # Timers must stop too: stopping only a service leaves its trigger armed.
-  systemctl --user stop "${WARNING_UNIT%.service}.timer" "${POWEROFF_UNIT%.service}.timer" "$WARNING_UNIT" "$POWEROFF_UNIT" >/dev/null 2>&1 || true
-  systemctl --user reset-failed "${WARNING_UNIT%.service}.timer" "${POWEROFF_UNIT%.service}.timer" "$WARNING_UNIT" "$POWEROFF_UNIT" >/dev/null 2>&1 || true
+  stop_owned_units "${WARNING_UNIT%.service}.timer|warning" "$WARNING_UNIT|warning" \
+    "${POWEROFF_UNIT%.service}.timer|poweroff" "$POWEROFF_UNIT|poweroff"
+}
+clear_units_or_die() {
+  clear_units || die 'hay unidades de systemd con el mismo nombre que no pertenecen a este plugin; no se modificaron (elimínalas o renómbralas y vuelve a intentarlo)'
 }
 cleanup_stale() {
   [[ -f "$STATE_FILE" ]] || return 0
@@ -130,7 +173,7 @@ schedule_locked() {
     die 'modo dry-run no modifica un temporizador real; usa shutdown-timer cancel sin --dry-run'
   fi
   if [[ $old_status == scheduled ]]; then
-    case "$replace" in replace) clear_units; log_event 'replaced_existing_timer=true' ;; keep) note 'Se conserva el temporizador existente.'; return 0 ;; cancel) note 'Operación cancelada.'; return 0 ;; *) choose_existing && { clear_units; log_event 'replaced_existing_timer=true'; } || { note 'Operación cancelada o conservada.'; return 0; } ;; esac
+    case "$replace" in replace) clear_units_or_die; log_event 'replaced_existing_timer=true' ;; keep) note 'Se conserva el temporizador existente.'; return 0 ;; cancel) note 'Operación cancelada.'; return 0 ;; *) choose_existing && { clear_units_or_die; log_event 'replaced_existing_timer=true'; } || { note 'Operación cancelada o conservada.'; return 0; } ;; esac
   fi
   target=$(( $(now_epoch) + seconds )); warning_delay=$((seconds - $(grace_seconds))); ((warning_delay < 1)) && warning_delay=1
   if [[ $dry == true ]]; then
@@ -140,10 +183,10 @@ schedule_locked() {
     note "SIMULACIÓN: el servicio final ejecutaría la acción: $ACTION"
     note "SIMULACIÓN: notificación final prevista para $(pretty_date "$target")."
   else
-    clear_units
+    clear_units_or_die
     if ! systemd-run --user --unit="$WARNING_UNIT" --on-active="${warning_delay}s" --timer-property=AccuracySec=1s --collect -- "$SELF" --internal-warning ||
        ! systemd-run --user --unit="$POWEROFF_UNIT" --on-active="${seconds}s" --collect -- "$SELF" --internal-poweroff; then
-      clear_units
+      clear_units || true
       if [[ -f "$STATE_FILE" ]]; then
         atomic_state "$(jq '.status="cancelled"' "$STATE_FILE")"
       fi
@@ -186,7 +229,7 @@ cancel_locked() {
     read -r -p '¿Cancelar el apagado programado? [s/N] ' confirmation
     [[ $confirmation == [sS] ]] || { note 'Cancelación rechazada.'; return 0; }
   fi
-  clear_units
+  clear_units || true
   jq '.status="cancelled"' "$STATE_FILE" > "$STATE_DIR/.cancelled.$$"; mv -f -- "$STATE_DIR/.cancelled.$$" "$STATE_FILE"
   log_event "cancelled mode=$mode"; [[ $mode == simulation ]] && mode='SIMULACIÓN' || mode='ACTIVO'; note "$mode: apagado cancelado."; notify 'Apagado cancelado' 'El temporizador ya no actuará sobre la PC.'
 }
@@ -201,10 +244,10 @@ extend_locked() {
   ((left <= $(max_hours) * 3600)) || die "el total supera el máximo de $(max_hours) horas"
   if [[ $mode == live ]]; then
     local warning_delay=$((left - $(grace_seconds))); ((warning_delay < 1)) && warning_delay=1
-    clear_units
+    clear_units_or_die
     if ! systemd-run --user --unit="$WARNING_UNIT" --on-active="${warning_delay}s" --timer-property=AccuracySec=1s --collect -- "$SELF" --internal-warning ||
        ! systemd-run --user --unit="$POWEROFF_UNIT" --on-active="${left}s" --collect -- "$SELF" --internal-poweroff; then
-      clear_units
+      clear_units || true
       die 'no se pudo extender el temporizador; se limpiaron las unidades'
     fi
   fi
@@ -290,12 +333,23 @@ timer_cancel_locked() {
     ids=$target
   fi
   for id in $ids; do
-    systemctl --user stop "$(alarm_unit "$id").timer" "$(alarm_unit "$id").service" >/dev/null 2>&1 || true
-    systemctl --user reset-failed "$(alarm_unit "$id").timer" "$(alarm_unit "$id").service" >/dev/null 2>&1 || true
+    stop_owned_units "$(alarm_unit "$id").timer|alarm $id" "$(alarm_unit "$id").service|alarm $id" || true
     alarms_write "$(alarms_read | jq -c --arg i "$id" 'map(select(.id != $i))')"
     log_event "alarm_cancelled id=$id"
   done
   note 'Temporizador cancelado.'
+}
+# Stops every unit this plugin created (the warning/poweroff pair and any timer
+# alarms) and leaves anything else alone. Used by uninstall.sh.
+reset_cmd() {
+  local rc=0 name id
+  clear_units || rc=1
+  while read -r name _; do
+    id=${name#shutdown-timer-alarm-}; id=${id%.*}
+    [[ $id =~ ^[0-9]+$ ]] || continue
+    stop_owned_units "$(alarm_unit "$id").timer|alarm $id" "$(alarm_unit "$id").service|alarm $id" || rc=1
+  done < <(systemctl --user list-units --all --plain --no-legend 'shutdown-timer-alarm-*' 2>/dev/null)
+  return $rc
 }
 timer_cancel_cmd() { with_alarm_lock timer_cancel_locked "$1"; }
 cancel_cmd() { with_lock cancel_locked; }
@@ -341,7 +395,7 @@ EOF
 usage() { cat <<'EOF'
 Uso: shutdown-timer [OPCIÓN] COMANDO
 Duraciones directas: 30m, 45m, 1h, 3h, 4h
-Comandos: timer DURACIÓN [MENSAJE] | timers | timer-cancel ID|all | schedule DURACIÓN | now | extend DURACIÓN | status [--short] | cancel | menu | logs | config
+Comandos: timer DURACIÓN [MENSAJE] | timers | timer-cancel ID|all | reset | schedule DURACIÓN | now | extend DURACIÓN | status [--short] | cancel | menu | logs | config
 Opciones: --action poweroff|reboot|suspend|hibernate|lock|logout, --dry-run, --replace, --keep, --yes, --help
 EOF
 }
@@ -355,6 +409,7 @@ case "$command_name" in
   timer) [[ $# -ge 1 ]] || die 'uso: shutdown-timer timer DURACIÓN [MENSAJE]'; alarm_dur=$1; shift; alarm_add "$alarm_dur" "$*" ;;
   timers) [[ $# -eq 0 ]] || die 'uso: shutdown-timer timers'; timers_cmd ;;
   timer-cancel) [[ $# -eq 1 ]] || die 'uso: shutdown-timer timer-cancel ID|all'; timer_cancel_cmd "$1" ;;
+  reset) [[ $# -eq 0 ]] || die 'uso: shutdown-timer reset'; reset_cmd ;;
   now) [[ $# -eq 0 ]] || die 'uso: shutdown-timer --action ACCIÓN now'; now_cmd ;;
   extend) [[ $# -eq 1 ]] || die 'uso: shutdown-timer extend DURACIÓN'; extend_cmd "$1" ;;
   cancel) [[ $# -eq 0 ]] || die 'uso: shutdown-timer cancel'; cancel_cmd ;;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.3 - 2026-09-30
+
+- Seguridad: el CLI ya no para ni sobrescribe unidades de systemd por nombre. Antes de cualquier `stop` verifica que sean unidades transitorias creadas por este plugin (`Transient=yes`, fragmento en el directorio transitorio, descripción `[systemd-run] …/shutdown-timer --internal-<modo>` y `ExecStart` coincidente en los servicios). Si hay una unidad ajena con el mismo nombre, no se toca ninguna y la operación se cancela con un mensaje claro.
+- `uninstall.sh` deja de parar `shutdown-timer-warning/poweroff.service` por nombre; usa `shutdown-timer cancel`, `timer-cancel all` y el nuevo `shutdown-timer reset`, que solo detienen unidades propias verificadas.
+- Cancelar un temporizador con aviso aplica la misma verificación.
+- Nuevos tests con unidades ajenas, descripciones falsificadas y unidades propias (53 en total).
+
 ## 0.6.2 - 2026-09-30
 
 - Las notificaciones usan `omarchy-notification-send` con un glifo (`omarchy-glyph`) en el hueco del icono, con los colores del tema, en vez del icono `alarm-clock` que no existe en todos los temas y se veía como el cuadro magenta de «icono no encontrado». Sin `omarchy-notification-send` se usa `notify-send` con la misma pista.

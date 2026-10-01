@@ -35,7 +35,7 @@ cd ~/.config/omarchy/plugins/io.github.omargond.shutdown-timer && ./uninstall.sh
 omarchy plugin remove io.github.omargond.shutdown-timer --yes
 ```
 
-This stops the plugin's systemd units and removes the CLI. Your config (`~/.config/shutdown-timer`) and logs (`~/.local/state/shutdown-timer`) are kept; delete them by hand to purge. If you added the countdown clock entry to `shell.json`, remove it there too.
+This stops only the systemd units this plugin created (any other unit that happens to share a name is left untouched) and removes the CLI. Your config (`~/.config/shutdown-timer`) and logs (`~/.local/state/shutdown-timer`) are kept; delete them by hand to purge. If you added the countdown clock entry to `shell.json`, remove it there too.
 
 ## License
 
@@ -147,6 +147,14 @@ Se crean dos unidades transitorias de systemd de usuario: una avisa cuando falta
 `grace_period_seconds` (600 por defecto) y otra ejecuta la acción elegida
 (`systemctl poweroff` por defecto) al alcanzar la hora prevista. No dependen de la terminal y no requieren sudo ni reglas sudoers.
 La orden real está aislada en `poweroff_command()` para pruebas.
+
+**Unidades ajenas.** Antes de parar cualquier unidad, el CLI comprueba que sea una
+unidad transitoria creada por este plugin (`Transient=yes`, fragmento en el
+directorio transitorio de systemd, descripción `[systemd-run] …/shutdown-timer
+--internal-<modo>` y, en los servicios, el mismo `ExecStart`). Si existe una unidad
+con uno de nuestros nombres que no cumple eso, **no se detiene ni se sobrescribe**:
+se informa del conflicto y la operación se cancela. `./uninstall.sh` usa el mismo
+criterio a través de `shutdown-timer reset`.
 
 El estado y eventos se guardan en `$XDG_STATE_HOME/shutdown-timer`; la
 configuración está en `$XDG_CONFIG_HOME/shutdown-timer/config.ini` y la

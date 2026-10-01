@@ -6,7 +6,7 @@ trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
 export XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.state" XDG_DATA_HOME="$HOME/.local/share" XDG_RUNTIME_DIR="$TMP/run"
 unset XDG_BIN_HOME
-mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$TMP/bin"
+mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$TMP/bin" "$TMP/units"
 LOG="$TMP/mock.log"
 cat > "$TMP/bin/systemd-run" <<'EOF'
 #!/usr/bin/env bash
@@ -15,7 +15,11 @@ EOF
 cat > "$TMP/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 printf 'systemctl %s\n' "$*" >> "$MOCK_LOG"
-case "$*" in *'is-active'*) exit 1 ;; *) exit 0 ;; esac
+case "$*" in
+  *'is-active'*) exit 1 ;;
+  *' show '*) last=${*: -1}; [[ -f "$MOCK_UNITS/$last" ]] && cat "$MOCK_UNITS/$last"; exit 0 ;;
+  *) exit 0 ;;
+esac
 EOF
 cat > "$TMP/bin/paplay" <<'MOCKEOF'
 #!/usr/bin/env bash
@@ -30,7 +34,7 @@ cat > "$TMP/bin/notify-send" <<'EOF'
 printf 'notify-send %s\n' "$*" >> "$MOCK_LOG"
 EOF
 chmod +x "$TMP/bin"/*
-export MOCK_LOG="$LOG" PATH="$TMP/bin:$PATH"
+export MOCK_LOG="$LOG" MOCK_UNITS="$TMP/units" PATH="$TMP/bin:$PATH"
 CLI="$ROOT/bin/shutdown-timer"
 pass=0
 ok() { printf 'ok - %s\n' "$1"; pass=$((pass + 1)); }
@@ -86,4 +90,55 @@ id=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json")
 id2=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json"); $CLI timer-cancel "$id2" >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'cancelar'; ok 'cancelar temporizador'
 $CLI timer 1h >/dev/null; $CLI timer 2h >/dev/null; $CLI timer-cancel all >/dev/null; [[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'cancelar todos'; ok 'cancelar todos'
 $CLI timers | grep -q 'No hay' || fail 'vacío'; ok 'lista vacía'
+# --- unit ownership: never stop a unit this plugin did not create ----------------
+unit_file() { # unit load transient fragment description [execstart]
+  printf 'LoadState=%s\nTransient=%s\nFragmentPath=%s\nDescription=%s\nExecStart=%s\n' "$2" "$3" "$4" "$5" "${6:-}" > "$MOCK_UNITS/$1"
+}
+ours_unit() { # unit mode
+  local kind=${1##*.} exec_start=''
+  [[ $kind == service ]] && exec_start="{ path=/opt/shutdown-timer ; argv[]=/opt/shutdown-timer --internal-$2 ; ignore_errors=no }"
+  unit_file "$1" loaded yes "/run/user/1000/systemd/transient/$1" "[systemd-run] /opt/shutdown-timer --internal-$2" "$exec_start"
+}
+reset_units() { rm -f "$MOCK_UNITS"/*; : > "$LOG"; rm -f "$XDG_STATE_HOME/shutdown-timer/state.json"; }
+no_stop() { ! grep -qE 'systemctl .*(stop|reset-failed)' "$LOG"; }
+
+reset_units
+unit_file shutdown-timer-warning.timer loaded no /etc/systemd/user/shutdown-timer-warning.timer 'My backup job'
+assert_fail "$CLI" --yes --replace 30m; no_stop || fail 'ajena: se paró'; ! grep -q 'systemd-run' "$LOG" || fail 'ajena: se creó encima'; ok 'unidad ajena con el mismo nombre: se conserva y no se programa'
+
+reset_units
+unit_file shutdown-timer-poweroff.service loaded no /home/u/.config/systemd/user/shutdown-timer-poweroff.service '[systemd-run] /opt/shutdown-timer --internal-poweroff' '{ path=/bin/true ; argv[]=/bin/true ; }'
+assert_fail "$CLI" --yes --replace 30m; no_stop || fail 'falsa: se paró'; ok 'descripción falsificada en una unidad persistente se trata como ajena'
+
+reset_units
+unit_file shutdown-timer-warning.service loaded yes /run/user/1000/systemd/transient/shutdown-timer-warning.service '[systemd-run] /bin/true' '{ path=/bin/true ; argv[]=/bin/true ; }'
+assert_fail "$CLI" --yes --replace 30m; no_stop || fail 'transitoria ajena: se paró'; ok 'unidad transitoria de otro programa se trata como ajena'
+
+reset_units
+unit_file shutdown-timer-warning.timer loaded no /etc/systemd/user/x.timer 'Mine'
+"$CLI" reset >/dev/null 2>&1 && fail 'reset con ajena debería avisar'; no_stop || fail 'reset: se paró una ajena'; ok 'reset no toca unidades ajenas'
+
+reset_units
+for u in warning poweroff; do ours_unit "shutdown-timer-$u.timer" "$u"; ours_unit "shutdown-timer-$u.service" "$u"; done
+"$CLI" --yes --replace 30m >/dev/null || fail 'propias: no se pudo reprogramar'
+for u in warning poweroff; do grep -q "systemctl --user stop shutdown-timer-$u.timer" "$LOG" || fail "propias: no se paró $u.timer"; done
+grep -q 'systemd-run' "$LOG" || fail 'propias: no se creó'; ok 'unidades propias verificadas se paran y se reprograma'
+
+reset_units
+"$CLI" timer 20m x >/dev/null; aid=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json"); : > "$LOG"
+unit_file "shutdown-timer-alarm-$aid.timer" loaded no /etc/systemd/user/y.timer 'Unrelated'
+"$CLI" timer-cancel "$aid" >/dev/null 2>&1; no_stop || fail 'alarma ajena: se paró'
+[[ $(jq length "$XDG_STATE_HOME/shutdown-timer/alarms.json") -eq 0 ]] || fail 'alarma ajena: no se quitó el registro'; ok 'cancelar un temporizador no para una unidad ajena homónima'
+
+reset_units
+"$CLI" timer 20m x >/dev/null; aid=$(jq -r '.[0].id' "$XDG_STATE_HOME/shutdown-timer/alarms.json"); : > "$LOG"
+ours_unit "shutdown-timer-alarm-$aid.timer" "alarm $aid"; ours_unit "shutdown-timer-alarm-$aid.service" "alarm $aid"
+"$CLI" timer-cancel "$aid" >/dev/null 2>&1; grep -q "systemctl --user stop shutdown-timer-alarm-$aid.timer" "$LOG" || fail 'alarma propia: no se paró'; ok 'cancelar un temporizador propio sí para su unidad'
+
+reset_units
+"$ROOT/install.sh" >/dev/null 2>&1
+unit_file shutdown-timer-warning.service loaded no /etc/systemd/user/shutdown-timer-warning.service 'Mine'
+unit_file shutdown-timer-poweroff.service loaded no /etc/systemd/user/shutdown-timer-poweroff.service 'Mine'
+"$ROOT/uninstall.sh" >/dev/null 2>&1; no_stop || fail 'uninstall paró unidades ajenas'; [[ ! -e "$HOME/.local/bin/shutdown-timer" ]] || fail 'uninstall no retiró la CLI'; ok 'uninstall.sh no para unidades ajenas y retira la CLI'
+reset_units
 printf '\n%d pruebas superadas\n' "$pass"
